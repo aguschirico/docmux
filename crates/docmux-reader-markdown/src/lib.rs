@@ -52,6 +52,13 @@ impl MarkdownReader {
         let ast = node.data.borrow();
         match &ast.value {
             NodeValue::Paragraph => {
+                // Check for a paragraph that wraps a single display-math node.
+                // comrak places `$$…$$` inside a Paragraph; we promote it to
+                // a proper Block::MathBlock so writers can render it as a
+                // display equation (e.g. <div> instead of <span>).
+                if let Some(math_block) = self.try_extract_display_math(node) {
+                    return Some(math_block);
+                }
                 let content = self.collect_inlines(node);
                 Some(Block::Paragraph { content })
             }
@@ -145,6 +152,25 @@ impl MarkdownReader {
                 None
             }
         }
+    }
+
+    /// If `node` is a Paragraph whose sole child is a display-math node,
+    /// extract it as a `Block::MathBlock`. Returns `None` otherwise.
+    fn try_extract_display_math<'a>(&self, node: &'a AstNode<'a>) -> Option<Block> {
+        let children: Vec<_> = node.children().collect();
+        if children.len() != 1 {
+            return None;
+        }
+        let child_ast = children[0].data.borrow();
+        if let NodeValue::Math(ref math) = child_ast.value {
+            if math.display_math {
+                return Some(Block::MathBlock {
+                    content: math.literal.trim().to_string(),
+                    label: None,
+                });
+            }
+        }
+        None
     }
 
     /// Collect inline children of a node.
@@ -369,6 +395,23 @@ mod tests {
         if let Block::Paragraph { content } = &doc.content[0] {
             let has_math = content.iter().any(|i| matches!(i, Inline::MathInline { .. }));
             assert!(has_math, "Expected inline math in: {:?}", content);
+        }
+    }
+
+    #[test]
+    fn parse_display_math() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("Before.\n\n$$\nx^2 + y^2 = z^2\n$$\n\nAfter.").unwrap();
+        assert_eq!(doc.content.len(), 3, "Expected 3 blocks, got: {:#?}", doc.content);
+        match &doc.content[1] {
+            Block::MathBlock { content, label } => {
+                assert!(
+                    content.contains("x^2 + y^2 = z^2"),
+                    "Expected math content, got: {content}"
+                );
+                assert!(label.is_none());
+            }
+            other => panic!("Expected MathBlock, got {:?}", other),
         }
     }
 

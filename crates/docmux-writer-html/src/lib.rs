@@ -340,7 +340,7 @@ impl HtmlWriter {
                 if let Some(t) = &img.title {
                     out.push_str(&format!(" title=\"{}\"", escape_attr(t)));
                 }
-                out.push_str(">");
+                out.push('>');
             }
             Inline::Citation(cite) => {
                 // Placeholder rendering — transforms should resolve this first
