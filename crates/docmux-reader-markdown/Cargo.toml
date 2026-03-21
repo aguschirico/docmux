@@ -1,0 +1,13 @@
+[package]
+name = "docmux-reader-markdown"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Markdown reader for docmux (CommonMark + GFM extensions)"
+rust-version.workspace = true
+
+[dependencies]
+docmux-ast = { workspace = true }
+docmux-core = { workspace = true }
+comrak = { workspace = true }

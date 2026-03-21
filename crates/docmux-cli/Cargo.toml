@@ -1,0 +1,19 @@
+[package]
+name = "docmux-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CLI for docmux — universal document converter"
+rust-version.workspace = true
+
+[[bin]]
+name = "docmux"
+path = "src/main.rs"
+
+[dependencies]
+docmux-ast = { workspace = true }
+docmux-core = { workspace = true }
+docmux-reader-markdown = { workspace = true }
+docmux-writer-html = { workspace = true }
+clap = { workspace = true }

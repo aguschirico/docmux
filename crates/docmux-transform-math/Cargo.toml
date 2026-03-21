@@ -1,0 +1,12 @@
+[package]
+name = "docmux-transform-math"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Part of docmux — universal document converter"
+rust-version.workspace = true
+
+[dependencies]
+docmux-ast = { workspace = true }
+docmux-core = { workspace = true }

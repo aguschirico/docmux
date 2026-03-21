@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/docmux-ast",
+    "crates/docmux-core",
+    "crates/docmux-reader-markdown",
+    "crates/docmux-reader-myst",
+    "crates/docmux-reader-typst",
+    "crates/docmux-reader-latex",
+    "crates/docmux-writer-html",
+    "crates/docmux-writer-latex",
+    "crates/docmux-writer-typst",
+    "crates/docmux-writer-docx",
+    "crates/docmux-transform-math",
+    "crates/docmux-transform-cite",
+    "crates/docmux-transform-crossref",
+    "crates/docmux-cli",
+    "crates/docmux-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/docmux/docmux"
+description = "Universal document converter — MIT licensed, WASM-first"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Internal crates
+docmux-ast = { path = "crates/docmux-ast" }
+docmux-core = { path = "crates/docmux-core" }
+docmux-reader-markdown = { path = "crates/docmux-reader-markdown" }
+docmux-reader-myst = { path = "crates/docmux-reader-myst" }
+docmux-reader-typst = { path = "crates/docmux-reader-typst" }
+docmux-reader-latex = { path = "crates/docmux-reader-latex" }
+docmux-writer-html = { path = "crates/docmux-writer-html" }
+docmux-writer-latex = { path = "crates/docmux-writer-latex" }
+docmux-writer-typst = { path = "crates/docmux-writer-typst" }
+docmux-writer-docx = { path = "crates/docmux-writer-docx" }
+docmux-transform-math = { path = "crates/docmux-transform-math" }
+docmux-transform-cite = { path = "crates/docmux-transform-cite" }
+docmux-transform-crossref = { path = "crates/docmux-transform-crossref" }
+
+# External dependencies
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+comrak = { version = "0.36", default-features = false }
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+strip = true
