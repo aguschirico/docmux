@@ -27,11 +27,7 @@ impl LatexWriter {
                 self.write_inlines(content, opts, out);
                 out.push_str("\n\n");
             }
-            Block::Heading {
-                level,
-                id,
-                content,
-            } => {
+            Block::Heading { level, id, content } => {
                 let cmd = match level {
                     1 => "section",
                     2 => "subsection",
@@ -98,7 +94,11 @@ impl LatexWriter {
                 }
                 for item in items {
                     if let Some(checked) = item.checked {
-                        let marker = if checked { "$\\boxtimes$" } else { "$\\square$" };
+                        let marker = if checked {
+                            "$\\boxtimes$"
+                        } else {
+                            "$\\square$"
+                        };
                         out.push_str(&format!("\\item[{marker}] "));
                     } else {
                         out.push_str("\\item ");
@@ -331,10 +331,7 @@ impl LatexWriter {
                 }
             }
             Inline::Image(img) => {
-                out.push_str(&format!(
-                    "\\includegraphics{{{}}}",
-                    escape_latex(&img.url)
-                ));
+                out.push_str(&format!("\\includegraphics{{{}}}", escape_latex(&img.url)));
             }
             Inline::Citation(cite) => {
                 if let Some(prefix) = &cite.prefix {
@@ -358,26 +355,24 @@ impl LatexWriter {
             Inline::FootnoteRef { id } => {
                 out.push_str(&format!("\\footnotemark[{}]", escape_latex(id)));
             }
-            Inline::CrossRef(cr) => {
-                match cr.form {
-                    RefForm::Number => {
-                        out.push_str(&format!("\\ref{{{}}}", escape_label(&cr.target)));
-                    }
-                    RefForm::NumberWithType => {
-                        out.push_str(&format!("\\autoref{{{}}}", escape_label(&cr.target)));
-                    }
-                    RefForm::Page => {
-                        out.push_str(&format!("\\pageref{{{}}}", escape_label(&cr.target)));
-                    }
-                    RefForm::Custom(ref text) => {
-                        out.push_str(&format!(
-                            "{}~\\ref{{{}}}",
-                            escape_latex(text),
-                            escape_label(&cr.target)
-                        ));
-                    }
+            Inline::CrossRef(cr) => match cr.form {
+                RefForm::Number => {
+                    out.push_str(&format!("\\ref{{{}}}", escape_label(&cr.target)));
                 }
-            }
+                RefForm::NumberWithType => {
+                    out.push_str(&format!("\\autoref{{{}}}", escape_label(&cr.target)));
+                }
+                RefForm::Page => {
+                    out.push_str(&format!("\\pageref{{{}}}", escape_label(&cr.target)));
+                }
+                RefForm::Custom(ref text) => {
+                    out.push_str(&format!(
+                        "{}~\\ref{{{}}}",
+                        escape_latex(text),
+                        escape_label(&cr.target)
+                    ));
+                }
+            },
             Inline::RawInline { format, content } => {
                 if format == "latex" || format == "tex" {
                     out.push_str(content);

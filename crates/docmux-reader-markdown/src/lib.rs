@@ -88,10 +88,7 @@ impl MarkdownReader {
                 Some(Block::BlockQuote { content })
             }
             NodeValue::List(list) => {
-                let ordered = matches!(
-                    list.list_type,
-                    comrak::nodes::ListType::Ordered
-                );
+                let ordered = matches!(list.list_type, comrak::nodes::ListType::Ordered);
                 let start = if ordered {
                     Some(list.start as u32)
                 } else {
@@ -244,7 +241,9 @@ impl MarkdownReader {
                 out.push(Inline::HardBreak);
             }
             NodeValue::FootnoteReference(ref fref) => {
-                out.push(Inline::FootnoteRef { id: fref.name.clone() });
+                out.push(Inline::FootnoteRef {
+                    id: fref.name.clone(),
+                });
             }
             NodeValue::Math(math) => {
                 if math.display_math {
@@ -393,7 +392,9 @@ mod tests {
         let doc = reader.read("The formula $E = mc^2$ is famous.").unwrap();
         assert_eq!(doc.content.len(), 1);
         if let Block::Paragraph { content } = &doc.content[0] {
-            let has_math = content.iter().any(|i| matches!(i, Inline::MathInline { .. }));
+            let has_math = content
+                .iter()
+                .any(|i| matches!(i, Inline::MathInline { .. }));
             assert!(has_math, "Expected inline math in: {:?}", content);
         }
     }
@@ -401,8 +402,15 @@ mod tests {
     #[test]
     fn parse_display_math() {
         let reader = MarkdownReader::new();
-        let doc = reader.read("Before.\n\n$$\nx^2 + y^2 = z^2\n$$\n\nAfter.").unwrap();
-        assert_eq!(doc.content.len(), 3, "Expected 3 blocks, got: {:#?}", doc.content);
+        let doc = reader
+            .read("Before.\n\n$$\nx^2 + y^2 = z^2\n$$\n\nAfter.")
+            .unwrap();
+        assert_eq!(
+            doc.content.len(),
+            3,
+            "Expected 3 blocks, got: {:#?}",
+            doc.content
+        );
         match &doc.content[1] {
             Block::MathBlock { content, label } => {
                 assert!(
@@ -421,7 +429,9 @@ mod tests {
         let doc = reader.read("```rust\nfn main() {}\n```").unwrap();
         assert_eq!(doc.content.len(), 1);
         match &doc.content[0] {
-            Block::CodeBlock { language, content, .. } => {
+            Block::CodeBlock {
+                language, content, ..
+            } => {
                 assert_eq!(language.as_deref(), Some("rust"));
                 assert!(content.contains("fn main()"));
             }

@@ -407,11 +407,7 @@ impl HtmlWriter {
     }
 
     fn wrap_standalone(&self, body: &str, doc: &Document, opts: &WriteOptions) -> String {
-        let title = doc
-            .metadata
-            .title
-            .as_deref()
-            .unwrap_or("Untitled Document");
+        let title = doc.metadata.title.as_deref().unwrap_or("Untitled Document");
 
         let math_head = match opts.math_engine {
             MathEngine::KaTeX => {

@@ -88,9 +88,15 @@ fn standalone_flag_produces_full_html() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("<!DOCTYPE html>"), "Expected full HTML document");
+    assert!(
+        stdout.contains("<!DOCTYPE html>"),
+        "Expected full HTML document"
+    );
     assert!(stdout.contains("<title>"), "Expected <title> tag");
-    assert!(stdout.contains("katex"), "Expected KaTeX include in standalone mode");
+    assert!(
+        stdout.contains("katex"),
+        "Expected KaTeX include in standalone mode"
+    );
 }
 
 #[test]

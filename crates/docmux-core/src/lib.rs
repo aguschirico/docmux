@@ -214,17 +214,19 @@ impl Registry {
     /// Look up a reader by format name or file extension.
     pub fn find_reader(&self, name_or_ext: &str) -> Option<&dyn Reader> {
         let needle = name_or_ext.trim_start_matches('.');
-        self.readers.iter().find(|r| {
-            r.format() == needle || r.extensions().contains(&needle)
-        }).map(|r| r.as_ref())
+        self.readers
+            .iter()
+            .find(|r| r.format() == needle || r.extensions().contains(&needle))
+            .map(|r| r.as_ref())
     }
 
     /// Look up a writer by format name or default extension.
     pub fn find_writer(&self, name_or_ext: &str) -> Option<&dyn Writer> {
         let needle = name_or_ext.trim_start_matches('.');
-        self.writers.iter().find(|w| {
-            w.format() == needle || w.default_extension() == needle
-        }).map(|w| w.as_ref())
+        self.writers
+            .iter()
+            .find(|w| w.format() == needle || w.default_extension() == needle)
+            .map(|w| w.as_ref())
     }
 
     /// List available reader format names.

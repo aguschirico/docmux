@@ -391,9 +391,7 @@ impl Block {
     /// Shorthand for a paragraph with a single text inline.
     pub fn text(s: impl Into<String>) -> Self {
         Block::Paragraph {
-            content: vec![Inline::Text {
-                value: s.into(),
-            }],
+            content: vec![Inline::Text { value: s.into() }],
         }
     }
 
@@ -402,9 +400,7 @@ impl Block {
         Block::Heading {
             level,
             id: None,
-            content: vec![Inline::Text {
-                value: text.into(),
-            }],
+            content: vec![Inline::Text { value: text.into() }],
         }
     }
 }
@@ -469,16 +465,38 @@ mod tests {
             caption: Some(vec![Inline::text("Results")]),
             label: Some("tab:results".into()),
             columns: vec![
-                ColumnSpec { alignment: Alignment::Left, width: None },
-                ColumnSpec { alignment: Alignment::Right, width: Some(0.3) },
+                ColumnSpec {
+                    alignment: Alignment::Left,
+                    width: None,
+                },
+                ColumnSpec {
+                    alignment: Alignment::Right,
+                    width: Some(0.3),
+                },
             ],
             header: Some(vec![
-                TableCell { content: vec![Block::text("Name")], colspan: 1, rowspan: 1 },
-                TableCell { content: vec![Block::text("Value")], colspan: 1, rowspan: 1 },
+                TableCell {
+                    content: vec![Block::text("Name")],
+                    colspan: 1,
+                    rowspan: 1,
+                },
+                TableCell {
+                    content: vec![Block::text("Value")],
+                    colspan: 1,
+                    rowspan: 1,
+                },
             ]),
             rows: vec![vec![
-                TableCell { content: vec![Block::text("Pi")], colspan: 1, rowspan: 1 },
-                TableCell { content: vec![Block::text("3.14")], colspan: 1, rowspan: 1 },
+                TableCell {
+                    content: vec![Block::text("Pi")],
+                    colspan: 1,
+                    rowspan: 1,
+                },
+                TableCell {
+                    content: vec![Block::text("3.14")],
+                    colspan: 1,
+                    rowspan: 1,
+                },
             ]],
         };
         assert_eq!(table.rows.len(), 1);
