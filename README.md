@@ -22,7 +22,7 @@ docmux is a document conversion library and CLI tool that converts between marku
 |--------|--------|--------|
 | Markdown (CommonMark + GFM) | ✅ | — |
 | HTML5 | — | ✅ |
-| LaTeX | 🔜 | 🔜 |
+| LaTeX | 🔜 | ✅ |
 | Typst | 🔜 | 🔜 |
 | MyST | 🔜 | — |
 | DOCX | 🔜 | 🔜 |

@@ -22,6 +22,7 @@
 use docmux_core::{Reader, WriteOptions, Writer};
 use docmux_reader_markdown::MarkdownReader;
 use docmux_writer_html::HtmlWriter;
+use docmux_writer_latex::LatexWriter;
 use std::path::{Path, PathBuf};
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -74,6 +75,20 @@ fn convert_md_to_html(input: &str) -> String {
     writer
         .write(&doc, &opts)
         .expect("html writer should not fail")
+}
+
+/// Convert Markdown → LaTeX using the pipeline (fragment mode, no standalone wrapper).
+fn convert_md_to_latex(input: &str) -> String {
+    let reader = MarkdownReader::new();
+    let writer = LatexWriter::new();
+    let opts = WriteOptions::default();
+
+    let doc = reader
+        .read(input)
+        .expect("markdown reader should not fail on fixture");
+    writer
+        .write(&doc, &opts)
+        .expect("latex writer should not fail")
 }
 
 /// Human-readable test name from a fixture path.
@@ -160,6 +175,82 @@ fn golden_md_to_html() {
     if !failures.is_empty() {
         panic!(
             "\n\n{count} golden file(s) mismatched:\n\n{details}",
+            count = failures.len(),
+            details = failures.join("\n"),
+        );
+    }
+}
+
+#[test]
+fn golden_md_to_latex() {
+    let base = fixtures_dir();
+    let fixtures = discover_fixtures(&base);
+
+    assert!(
+        !fixtures.is_empty(),
+        "No .md fixtures found under {}",
+        base.display()
+    );
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut generated = 0u32;
+    let mut updated = 0u32;
+
+    for fixture_path in &fixtures {
+        let name = test_name(fixture_path, &base);
+        let expected_path = fixture_path.with_extension("tex");
+
+        let input = std::fs::read_to_string(fixture_path)
+            .unwrap_or_else(|e| panic!("[{name}] failed to read input: {e}"));
+
+        let actual = convert_md_to_latex(&input);
+
+        if update_mode() {
+            std::fs::write(&expected_path, &actual)
+                .unwrap_or_else(|e| panic!("[{name}] failed to write expected: {e}"));
+            updated += 1;
+            eprintln!("  updated: {name}.tex");
+            continue;
+        }
+
+        if !expected_path.exists() {
+            std::fs::write(&expected_path, &actual)
+                .unwrap_or_else(|e| panic!("[{name}] failed to write expected: {e}"));
+            generated += 1;
+            eprintln!("  generated: {name}.tex (new fixture — review the .tex file)");
+            continue;
+        }
+
+        let expected = std::fs::read_to_string(&expected_path)
+            .unwrap_or_else(|e| panic!("[{name}] failed to read expected: {e}"));
+
+        if actual != expected {
+            failures.push(format!(
+                "━━━ MISMATCH: {name}.tex ━━━\n\
+                 --- expected ({path})\n\
+                 +++ actual\n\n\
+                 {diff}\n\
+                 Hint: run `DOCMUX_UPDATE_EXPECTATIONS=1 cargo test -p docmux-cli --test golden` to update.\n",
+                path = expected_path.display(),
+                diff = line_diff(&expected, &actual),
+            ));
+        }
+    }
+
+    if generated > 0 {
+        eprintln!(
+            "\n  {} new LaTeX expectation file(s) generated. Review and commit them.",
+            generated
+        );
+    }
+
+    if updated > 0 {
+        eprintln!("\n  {} LaTeX expectation file(s) updated.", updated);
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "\n\n{count} LaTeX golden file(s) mismatched:\n\n{details}",
             count = failures.len(),
             details = failures.join("\n"),
         );

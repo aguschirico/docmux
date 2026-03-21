@@ -15,4 +15,5 @@ docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
 docmux-reader-markdown = { workspace = true }
 docmux-writer-html = { workspace = true }
+docmux-writer-latex = { workspace = true }
 wasm-bindgen = "0.2"
