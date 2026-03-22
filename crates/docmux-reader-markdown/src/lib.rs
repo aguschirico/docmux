@@ -2,6 +2,10 @@
 //!
 //! Markdown reader for docmux. Parses CommonMark + GFM extensions into the
 //! docmux AST using [comrak](https://crates.io/crates/comrak) under the hood.
+//!
+//! Supports YAML frontmatter (delimited by `---`) which is parsed into the
+//! [`Metadata`] struct. Known fields (`title`, `author`, `date`, `abstract`)
+//! are extracted into typed fields; everything else goes into `custom`.
 
 use comrak::{
     nodes::{AstNode, NodeValue},
@@ -9,6 +13,7 @@ use comrak::{
 };
 use docmux_ast::*;
 use docmux_core::{Reader, Result};
+use std::collections::HashMap;
 
 /// A Markdown reader backed by comrak.
 #[derive(Debug, Default)]
@@ -30,16 +35,99 @@ impl MarkdownReader {
         opts.extension.description_lists = true;
         opts.extension.math_dollars = true;
         opts.extension.math_code = true;
+        opts.extension.front_matter_delimiter = Some("---".into());
         // Parse options
         opts.parse.smart = true;
         opts
     }
 
+    /// Extract YAML frontmatter from the comrak AST and parse it into Metadata.
+    fn extract_frontmatter<'a>(&self, root: &'a AstNode<'a>) -> Metadata {
+        for child in root.children() {
+            let ast = child.data.borrow();
+            if let NodeValue::FrontMatter(ref raw) = ast.value {
+                // comrak includes the delimiters; strip them
+                let yaml = raw
+                    .trim()
+                    .strip_prefix("---")
+                    .unwrap_or(raw)
+                    .strip_suffix("---")
+                    .unwrap_or(raw)
+                    .trim();
+
+                if yaml.is_empty() {
+                    return Metadata::default();
+                }
+
+                return self.parse_yaml_frontmatter(yaml);
+            }
+        }
+        Metadata::default()
+    }
+
+    /// Parse a YAML string into our Metadata struct (two-pass approach).
+    ///
+    /// First pass: deserialize to `serde_yaml::Value` to capture everything.
+    /// Second pass: extract known fields into typed Metadata fields, put the
+    /// rest into `custom`.
+    fn parse_yaml_frontmatter(&self, yaml: &str) -> Metadata {
+        let value: serde_yaml::Value = match serde_yaml::from_str(yaml) {
+            Ok(v) => v,
+            Err(_) => return Metadata::default(),
+        };
+
+        let mapping = match value.as_mapping() {
+            Some(m) => m,
+            None => return Metadata::default(),
+        };
+
+        let mut metadata = Metadata::default();
+        let mut custom = HashMap::new();
+
+        for (key, val) in mapping {
+            let key_str = match key.as_str() {
+                Some(s) => s,
+                None => continue,
+            };
+
+            match key_str {
+                "title" => {
+                    metadata.title = val.as_str().map(String::from);
+                }
+                "date" => {
+                    metadata.date = yaml_value_to_string(val);
+                }
+                "abstract" | "abstract_text" | "description" => {
+                    metadata.abstract_text = val.as_str().map(String::from);
+                }
+                "keywords" | "tags" => {
+                    metadata.keywords = parse_string_list(val);
+                }
+                "author" | "authors" => {
+                    metadata.authors = parse_authors(val);
+                }
+                _ => {
+                    if let Some(mv) = yaml_to_meta_value(val) {
+                        custom.insert(key_str.to_string(), mv);
+                    }
+                }
+            }
+        }
+
+        metadata.custom = custom;
+        metadata
+    }
+
     /// Convert a comrak AST node tree into our docmux AST blocks.
+    /// Skips FrontMatter nodes (already extracted by `extract_frontmatter`).
     fn convert_node<'a>(&self, node: &'a AstNode<'a>) -> Vec<Block> {
         let mut blocks = Vec::new();
 
         for child in node.children() {
+            // Skip frontmatter — already handled
+            if matches!(child.data.borrow().value, NodeValue::FrontMatter(_)) {
+                continue;
+            }
             if let Some(block) = self.node_to_block(child) {
                 blocks.push(block);
             }
@@ -338,16 +426,116 @@ impl Reader for MarkdownReader {
         let opts = Self::comrak_options();
         let root = parse_document(&arena, input, &opts);
 
+        // Extract frontmatter before converting content
+        let metadata = self.extract_frontmatter(root);
         let content = self.convert_node(root);
-
-        // TODO: extract YAML frontmatter into Metadata
-        let metadata = Metadata::default();
 
         Ok(Document {
             metadata,
             content,
             bibliography: None,
         })
+    }
+}
+
+// ─── YAML frontmatter helpers ────────────────────────────────────────────────
+
+/// Parse the `author`/`authors` field which can be:
+/// - A single string: `"Jane Doe"`
+/// - A list of strings: `["Jane Doe", "John Smith"]`
+/// - A list of objects: `[{name: "Jane Doe", affiliation: "MIT"}]`
+fn parse_authors(val: &serde_yaml::Value) -> Vec<Author> {
+    match val {
+        serde_yaml::Value::String(s) => vec![Author {
+            name: s.clone(),
+            affiliation: None,
+            email: None,
+            orcid: None,
+        }],
+        serde_yaml::Value::Sequence(seq) => seq
+            .iter()
+            .filter_map(|item| match item {
+                serde_yaml::Value::String(s) => Some(Author {
+                    name: s.clone(),
+                    affiliation: None,
+                    email: None,
+                    orcid: None,
+                }),
+                serde_yaml::Value::Mapping(m) => {
+                    let name = m
+                        .get(serde_yaml::Value::String("name".into()))?
+                        .as_str()?
+                        .to_string();
+                    let affiliation = m
+                        .get(serde_yaml::Value::String("affiliation".into()))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    let email = m
+                        .get(serde_yaml::Value::String("email".into()))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    let orcid = m
+                        .get(serde_yaml::Value::String("orcid".into()))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    Some(Author {
+                        name,
+                        affiliation,
+                        email,
+                        orcid,
+                    })
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Parse a YAML value that should be a list of strings.
+fn parse_string_list(val: &serde_yaml::Value) -> Vec<String> {
+    match val {
+        serde_yaml::Value::Sequence(seq) => seq
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
+        serde_yaml::Value::String(s) => s.split(',').map(|s| s.trim().to_string()).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Convert a serde_yaml::Value to a string, handling numbers and bools.
+fn yaml_value_to_string(val: &serde_yaml::Value) -> Option<String> {
+    match val {
+        serde_yaml::Value::String(s) => Some(s.clone()),
+        serde_yaml::Value::Number(n) => Some(n.to_string()),
+        serde_yaml::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// Convert a serde_yaml::Value into our MetaValue enum.
+fn yaml_to_meta_value(val: &serde_yaml::Value) -> Option<MetaValue> {
+    match val {
+        serde_yaml::Value::String(s) => Some(MetaValue::String(s.clone())),
+        serde_yaml::Value::Bool(b) => Some(MetaValue::Bool(*b)),
+        serde_yaml::Value::Number(n) => n.as_f64().map(MetaValue::Number),
+        serde_yaml::Value::Sequence(seq) => {
+            let items: Vec<MetaValue> = seq.iter().filter_map(yaml_to_meta_value).collect();
+            Some(MetaValue::List(items))
+        }
+        serde_yaml::Value::Mapping(m) => {
+            let map: HashMap<String, MetaValue> = m
+                .iter()
+                .filter_map(|(k, v)| {
+                    let key = k.as_str()?.to_string();
+                    let val = yaml_to_meta_value(v)?;
+                    Some((key, val))
+                })
+                .collect();
+            Some(MetaValue::Map(map))
+        }
+        _ => None,
     }
 }
 
@@ -475,5 +663,83 @@ mod tests {
         let reader = MarkdownReader::new();
         assert_eq!(reader.format(), "markdown");
         assert!(reader.extensions().contains(&"md"));
+    }
+
+    // ─── Frontmatter tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn frontmatter_title_and_date() {
+        let reader = MarkdownReader::new();
+        let doc = reader
+            .read("---\ntitle: My Paper\ndate: 2026-03-21\n---\n\nBody text.")
+            .unwrap();
+        assert_eq!(doc.metadata.title.as_deref(), Some("My Paper"));
+        assert_eq!(doc.metadata.date.as_deref(), Some("2026-03-21"));
+        // Body should be parsed normally (frontmatter not in content)
+        assert_eq!(doc.content.len(), 1);
+    }
+
+    #[test]
+    fn frontmatter_single_author_string() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("---\nauthor: Jane Doe\n---\n\nHello.").unwrap();
+        assert_eq!(doc.metadata.authors.len(), 1);
+        assert_eq!(doc.metadata.authors[0].name, "Jane Doe");
+    }
+
+    #[test]
+    fn frontmatter_author_list_of_strings() {
+        let reader = MarkdownReader::new();
+        let doc = reader
+            .read("---\nauthor:\n  - Jane Doe\n  - John Smith\n---\n\nHello.")
+            .unwrap();
+        assert_eq!(doc.metadata.authors.len(), 2);
+        assert_eq!(doc.metadata.authors[0].name, "Jane Doe");
+        assert_eq!(doc.metadata.authors[1].name, "John Smith");
+    }
+
+    #[test]
+    fn frontmatter_author_list_of_objects() {
+        let reader = MarkdownReader::new();
+        let input = "---\nauthor:\n  - name: Jane Doe\n    affiliation: MIT\n    email: jane@mit.edu\n---\n\nBody.";
+        let doc = reader.read(input).unwrap();
+        assert_eq!(doc.metadata.authors.len(), 1);
+        assert_eq!(doc.metadata.authors[0].name, "Jane Doe");
+        assert_eq!(doc.metadata.authors[0].affiliation.as_deref(), Some("MIT"));
+        assert_eq!(
+            doc.metadata.authors[0].email.as_deref(),
+            Some("jane@mit.edu")
+        );
+    }
+
+    #[test]
+    fn frontmatter_abstract_and_keywords() {
+        let reader = MarkdownReader::new();
+        let input =
+            "---\ntitle: Test\nabstract: This is the abstract.\nkeywords:\n  - rust\n  - wasm\n---\n\nBody.";
+        let doc = reader.read(input).unwrap();
+        assert_eq!(
+            doc.metadata.abstract_text.as_deref(),
+            Some("This is the abstract.")
+        );
+        assert_eq!(doc.metadata.keywords, vec!["rust", "wasm"]);
+    }
+
+    #[test]
+    fn frontmatter_custom_fields_preserved() {
+        let reader = MarkdownReader::new();
+        let input = "---\ntitle: Test\nlang: es\nbibliography: refs.bib\n---\n\nBody.";
+        let doc = reader.read(input).unwrap();
+        assert_eq!(doc.metadata.title.as_deref(), Some("Test"));
+        assert!(doc.metadata.custom.contains_key("lang"));
+        assert!(doc.metadata.custom.contains_key("bibliography"));
+    }
+
+    #[test]
+    fn no_frontmatter_returns_default_metadata() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("Just a paragraph.").unwrap();
+        assert!(doc.metadata.title.is_none());
+        assert!(doc.metadata.authors.is_empty());
     }
 }
