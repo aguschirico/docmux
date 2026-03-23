@@ -10,17 +10,17 @@
 - [x] `docmux-reader-markdown` — CommonMark + GFM via comrak, YAML frontmatter parsing (15 tests)
 - [x] `docmux-writer-html` — HTML5 semantic output, standalone mode with KaTeX/MathJax (6 tests)
 - [x] `docmux-writer-latex` — LaTeX output with document class, math environments, tables (10 tests)
-- [x] `docmux-cli` — clap CLI with format auto-detection (8 smoke + 2 golden tests)
+- [x] `docmux-cli` — clap CLI with format auto-detection (10 smoke + 3 golden tests)
 - [x] `docmux-wasm` — wasm-bindgen: `convert()`, `markdownToHtml()`, format listing
 - [x] Fix display math bug (`$$...$$` promoted from inline to `Block::MathBlock`)
 - [x] Golden file test harness (13 fixtures × 2 formats = 26 golden files)
 - [x] `docmux-transform-crossref` — auto-number figures, tables, equations; resolve `CrossRef` nodes (7 tests)
 
-**Total: 55 tests | clippy clean | fmt clean | CI green**
+**Total: 111 tests | clippy clean | fmt clean | CI green**
 
 ## Phase 2 — Ecosystem
 
-- [ ] `docmux-reader-latex` — parse LaTeX subset into AST
+- [x] `docmux-reader-latex` — recursive descent LaTeX parser, preamble extraction, best-effort with warnings (53 tests)
 - [ ] `npm/` package setup — publishable `@docmux/wasm` with JS/TS wrapper
 - [ ] `docmux-transform-cite` — basic CSL citation resolution
 - [ ] `docmux-transform-math` — normalize math notation across formats (KaTeX ↔ MathJax ↔ raw)
