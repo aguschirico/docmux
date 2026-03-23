@@ -4,6 +4,7 @@
 
 use clap::Parser;
 use docmux_core::{Registry, WriteOptions};
+use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
@@ -39,6 +40,7 @@ struct Cli {
 fn build_registry() -> Registry {
     let mut reg = Registry::new();
     reg.add_reader(Box::new(MarkdownReader::new()));
+    reg.add_reader(Box::new(LatexReader::new()));
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
     reg

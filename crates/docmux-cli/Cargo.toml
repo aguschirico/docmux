@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
+docmux-reader-latex = { workspace = true }
 docmux-reader-markdown = { workspace = true }
 docmux-writer-html = { workspace = true }
 docmux-writer-latex = { workspace = true }
