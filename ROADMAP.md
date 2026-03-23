@@ -16,7 +16,7 @@
 - [x] CLI smoke tests (8 tests: stdout, file output, --standalone, format flags, errors)
 - [x] `docmux-writer-latex` — LaTeX output with document class, math environments, tables
 - [x] YAML frontmatter parsing in Markdown reader → `Metadata`
-- [ ] `docmux-transform-crossref` — auto-number figures, tables, equations; resolve `CrossRef` nodes
+- [x] `docmux-transform-crossref` — auto-number figures, tables, equations; resolve `CrossRef` nodes
 
 ## Phase 2 — Ecosystem
 
