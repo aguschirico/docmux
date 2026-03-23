@@ -1,0 +1,72 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\title{A Sample Paper}
+\author{Jane Doe \and John Smith}
+\date{2026-03-23}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This paper demonstrates the LaTeX reader.
+\end{abstract}
+
+\section{Introduction}
+
+This is the introduction with inline math $E = mc^2$ and a citation \cite{smith2020}.
+
+\subsection{Background}
+
+See Figure~\ref{fig:example} and Table~\ref{tab:results}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics{example.png}
+\caption{An example figure}
+\label{fig:example}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{|l|r|}
+\hline
+Name & Value \\
+\hline
+Pi & 3.14 \\
+E & 2.72 \\
+\hline
+\end{tabular}
+\caption{Results}
+\label{tab:results}
+\end{table}
+
+\section{Methods}
+
+We used \textbf{bold} and \emph{italic} formatting. The equation:
+
+\begin{equation}
+\nabla \cdot \mathbf{E} = \frac{\rho}{\epsilon_0}
+\end{equation}
+
+\begin{itemize}
+\item First item
+\item Second item
+\end{itemize}
+
+\begin{enumerate}
+\item Step one
+\item Step two
+\end{enumerate}
+
+\begin{quote}
+A famous quote goes here.
+\end{quote}
+
+\begin{verbatim}
+fn main() {
+    println!("Hello!");
+}
+\end{verbatim}
+
+\end{document}
