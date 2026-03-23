@@ -1,6 +1,6 @@
 # LaTeX Reader Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status: COMPLETE** — All 10 tasks implemented on 2026-03-23. 111 tests passing, clippy clean.
 
 **Goal:** Implement `docmux-reader-latex` — a recursive descent parser that converts a practical subset of LaTeX into the docmux AST.
 
@@ -44,7 +44,7 @@
 - Modify: `crates/docmux-reader-markdown/src/lib.rs:433-437` (Document construction)
 - Modify: `crates/docmux-transform-crossref/src/lib.rs` (any direct Document construction in tests)
 
-- [ ] **Step 1: Add `ParseWarning` struct and `warnings` field to `Document`**
+- [x] **Step 1: Add `ParseWarning` struct and `warnings` field to `Document`**
 
 In `crates/docmux-ast/src/lib.rs`, add after the `Document` struct definition:
 
@@ -69,7 +69,7 @@ pub struct Document {
 }
 ```
 
-- [ ] **Step 2: Fix all compilation errors across the workspace**
+- [x] **Step 2: Fix all compilation errors across the workspace**
 
 Every place that constructs `Document { metadata, content, bibliography }` without `warnings` will fail. Find and fix them:
 
@@ -78,17 +78,17 @@ Every place that constructs `Document { metadata, content, bibliography }` witho
 - Any other crate that constructs `Document` directly.
 - Note: writer crate tests (`docmux-writer-html`, `docmux-writer-latex`) use `..Default::default()` and will compile without changes since `Vec<ParseWarning>` implements `Default`.
 
-- [ ] **Step 3: Run `cargo check --workspace` to verify**
+- [x] **Step 3: Run `cargo check --workspace` to verify**
 
 Run: `cargo check --workspace`
 Expected: compiles clean.
 
-- [ ] **Step 4: Run `cargo test --workspace` to verify nothing broke**
+- [x] **Step 4: Run `cargo test --workspace` to verify nothing broke**
 
 Run: `cargo test --workspace`
 Expected: all 55 existing tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/docmux-ast/src/lib.rs crates/docmux-reader-markdown/src/lib.rs crates/docmux-transform-crossref/src/lib.rs
@@ -102,7 +102,7 @@ git commit -m "Add ParseWarning to Document AST for reader diagnostics"
 **Files:**
 - Create: `crates/docmux-reader-latex/src/unescape.rs`
 
-- [ ] **Step 1: Write tests for unescape**
+- [x] **Step 1: Write tests for unescape**
 
 At the bottom of `unescape.rs`, add:
 
@@ -151,12 +151,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: FAIL — `unescape_latex` not found.
 
-- [ ] **Step 3: Implement `unescape_latex`**
+- [x] **Step 3: Implement `unescape_latex`**
 
 ```rust
 /// Revert LaTeX special character escaping.
@@ -210,16 +210,16 @@ pub fn unescape_latex(input: &str) -> String {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: all unescape tests pass.
 
-- [ ] **Step 5: Run `cargo clippy -p docmux-reader-latex -- -D warnings`**
+- [x] **Step 5: Run `cargo clippy -p docmux-reader-latex -- -D warnings`**
 
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/docmux-reader-latex/src/unescape.rs
@@ -233,7 +233,7 @@ git commit -m "Add LaTeX special character unescaping"
 **Files:**
 - Create: `crates/docmux-reader-latex/src/lexer.rs`
 
-- [ ] **Step 1: Write tests for the lexer**
+- [x] **Step 1: Write tests for the lexer**
 
 ```rust
 #[cfg(test)]
@@ -342,12 +342,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: FAIL — `Token` and `tokenize` not found.
 
-- [ ] **Step 3: Implement `Token` enum and `tokenize` function**
+- [x] **Step 3: Implement `Token` enum and `tokenize` function**
 
 ```rust
 /// A token produced by the LaTeX lexer.
@@ -402,17 +402,17 @@ Implement `pub fn tokenize(input: &str) -> Vec<Token>` — a character-by-charac
 - Emits `Newline` for single newlines within text (distinct from `BlankLine` which is `\n\n`)
 - Accumulates everything else into `Text` tokens
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: all lexer tests pass.
 
-- [ ] **Step 5: Run clippy**
+- [x] **Step 5: Run clippy**
 
 Run: `cargo clippy -p docmux-reader-latex -- -D warnings`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/docmux-reader-latex/src/lexer.rs
@@ -428,7 +428,7 @@ git commit -m "Add LaTeX lexer with token types and tokenizer"
 
 This task builds the parser skeleton: struct, helpers (`parse_brace_argument`, `parse_optional_argument`, `peek`, `advance`), preamble extraction, and paragraph assembly from inline tokens. No block environments yet.
 
-- [ ] **Step 1: Write tests for core parser functionality**
+- [x] **Step 1: Write tests for core parser functionality**
 
 ```rust
 #[cfg(test)]
@@ -546,12 +546,12 @@ Body.
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: FAIL — `Parser` not found.
 
-- [ ] **Step 3: Implement Parser struct and core methods**
+- [x] **Step 3: Implement Parser struct and core methods**
 
 Implement `Parser` struct with:
 - `tokens: Vec<Token>`, `pos: usize`, `warnings: Vec<ParseWarning>`
@@ -598,17 +598,17 @@ Silently ignored commands (consume with arguments, no warning):
 - `documentclass`, `usepackage`, `newcommand`, `renewcommand`, `maketitle`, `tableofcontents`, `bibliographystyle`, `pagestyle`, `thispagestyle`, `setlength`, `setcounter`
 - These are checked both in preamble parsing and in body parsing; they produce no output and no warning.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: all parser core tests pass.
 
-- [ ] **Step 5: Run clippy**
+- [x] **Step 5: Run clippy**
 
 Run: `cargo clippy -p docmux-reader-latex -- -D warnings`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/docmux-reader-latex/src/parser.rs
@@ -624,7 +624,7 @@ git commit -m "Add LaTeX parser core: paragraphs, inlines, preamble extraction"
 
 Adds `parse_environment` dispatch and handlers for all block environments.
 
-- [ ] **Step 1: Write tests for block environments**
+- [x] **Step 1: Write tests for block environments**
 
 Add to the test module in `parser.rs`:
 
@@ -879,12 +879,12 @@ Some text.");
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: FAIL — new tests fail.
 
-- [ ] **Step 3: Implement environment parsing**
+- [x] **Step 3: Implement environment parsing**
 
 Add to `parser.rs`:
 
@@ -920,17 +920,17 @@ Add to `parser.rs`:
 - `fn parse_tabular(&mut self) -> Table` — parse column spec from `{|l|r|c|}`, rows split by `\\`, cells by `&`
 - `fn parse_description(&mut self) -> Block` — `\item[term]` split
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p docmux-reader-latex`
 Expected: all block environment tests pass.
 
-- [ ] **Step 5: Run clippy**
+- [x] **Step 5: Run clippy**
 
 Run: `cargo clippy -p docmux-reader-latex -- -D warnings`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/docmux-reader-latex/src/parser.rs
@@ -945,11 +945,11 @@ git commit -m "Add block-level environment parsing to LaTeX parser"
 - Modify: `crates/docmux-reader-latex/Cargo.toml`
 - Modify: `crates/docmux-reader-latex/src/lib.rs`
 
-- [ ] **Step 1: Verify Cargo.toml is correct**
+- [x] **Step 1: Verify Cargo.toml is correct**
 
 The existing `Cargo.toml` already has the needed dependencies (`docmux-ast`, `docmux-core`). No changes needed — the reader never fails (best-effort), so `thiserror` is not required.
 
-- [ ] **Step 2: Implement `lib.rs`**
+- [x] **Step 2: Implement `lib.rs`**
 
 ```rust
 //! # docmux-reader-latex
@@ -1017,15 +1017,15 @@ Some text.").unwrap();
 }
 ```
 
-- [ ] **Step 3: Run `cargo check -p docmux-reader-latex`**
+- [x] **Step 3: Run `cargo check -p docmux-reader-latex`**
 
 Expected: compiles.
 
-- [ ] **Step 4: Run `cargo test -p docmux-reader-latex`**
+- [x] **Step 4: Run `cargo test -p docmux-reader-latex`**
 
 Expected: all tests pass (unescape + lexer + parser + lib).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/docmux-reader-latex/
@@ -1040,7 +1040,7 @@ git commit -m "Wire up LatexReader with Reader trait implementation"
 - Modify: `crates/docmux-cli/Cargo.toml`
 - Modify: `crates/docmux-cli/src/main.rs`
 
-- [ ] **Step 1: Add dependency to CLI Cargo.toml**
+- [x] **Step 1: Add dependency to CLI Cargo.toml**
 
 Add to `[dependencies]`:
 
@@ -1048,7 +1048,7 @@ Add to `[dependencies]`:
 docmux-reader-latex = { workspace = true }
 ```
 
-- [ ] **Step 2: Register reader in `build_registry()`**
+- [x] **Step 2: Register reader in `build_registry()`**
 
 In `crates/docmux-cli/src/main.rs`, add import:
 
@@ -1069,11 +1069,11 @@ fn build_registry() -> Registry {
 }
 ```
 
-- [ ] **Step 3: Run `cargo check -p docmux-cli`**
+- [x] **Step 3: Run `cargo check -p docmux-cli`**
 
 Expected: compiles.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/docmux-cli/Cargo.toml crates/docmux-cli/src/main.rs
@@ -1088,7 +1088,7 @@ git commit -m "Register LatexReader in CLI registry"
 - Modify: `crates/docmux-cli/tests/cli_smoke.rs`
 - Create: `tests/fixtures/basic/latex-paragraph.tex`
 
-- [ ] **Step 1: Create a simple LaTeX fixture**
+- [x] **Step 1: Create a simple LaTeX fixture**
 
 Create `tests/fixtures/basic/latex-paragraph.tex`:
 
@@ -1099,7 +1099,7 @@ This is a \textbf{bold} and \emph{italic} paragraph.
 \end{document}
 ```
 
-- [ ] **Step 2: Add smoke tests**
+- [x] **Step 2: Add smoke tests**
 
 Add to `crates/docmux-cli/tests/cli_smoke.rs`:
 
@@ -1137,12 +1137,12 @@ fn latex_auto_detects_format_by_extension() {
 }
 ```
 
-- [ ] **Step 3: Run smoke tests**
+- [x] **Step 3: Run smoke tests**
 
 Run: `cargo test -p docmux-cli --test cli_smoke`
 Expected: all smoke tests pass (including the 8 existing ones).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/fixtures/basic/latex-paragraph.tex crates/docmux-cli/tests/cli_smoke.rs
@@ -1164,7 +1164,7 @@ git commit -m "Add CLI smoke tests for LaTeX-to-HTML conversion"
 - Create: `tests/fixtures/complex/latex-academic-paper.tex`
 - Modify: `crates/docmux-cli/tests/golden.rs`
 
-- [ ] **Step 1: Create `.tex` fixtures**
+- [x] **Step 1: Create `.tex` fixtures**
 
 Create each fixture file covering the respective LaTeX constructs. Example `latex-heading.tex`:
 
@@ -1269,7 +1269,7 @@ fn main() {
 \end{document}
 ```
 
-- [ ] **Step 2: Add `golden_tex_to_html` test to `golden.rs`**
+- [x] **Step 2: Add `golden_tex_to_html` test to `golden.rs`**
 
 Add a new golden test function to `crates/docmux-cli/tests/golden.rs`:
 
@@ -1385,30 +1385,30 @@ fn golden_tex_to_html() {
 }
 ```
 
-- [ ] **Step 3: Add `docmux-reader-latex` dependency to CLI's Cargo.toml (if not already)**
+- [x] **Step 3: Add `docmux-reader-latex` dependency to CLI's Cargo.toml (if not already)**
 
 It should already be there from Task 7. Verify.
 
-- [ ] **Step 4: Run golden tests to bootstrap expectation files**
+- [x] **Step 4: Run golden tests to bootstrap expectation files**
 
 Run: `cargo test -p docmux-cli --test golden`
 Expected: generates `.tex.html` files for each `.tex` fixture. All existing `.md` golden tests still pass.
 
-- [ ] **Step 5: Review generated `.tex.html` files**
+- [x] **Step 5: Review generated `.tex.html` files**
 
 Manually review the generated HTML output for correctness.
 
-- [ ] **Step 6: Run full workspace test suite**
+- [x] **Step 6: Run full workspace test suite**
 
 Run: `cargo test --workspace`
 Expected: all tests pass.
 
-- [ ] **Step 7: Run clippy and fmt**
+- [x] **Step 7: Run clippy and fmt**
 
 Run: `cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --all -- --check`
 Expected: clean.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tests/fixtures/ crates/docmux-cli/tests/golden.rs crates/docmux-cli/Cargo.toml
@@ -1422,7 +1422,7 @@ git commit -m "Add golden test fixtures and harness for LaTeX-to-HTML"
 **Files:**
 - Modify: `ROADMAP.md`
 
-- [ ] **Step 1: Mark `docmux-reader-latex` as complete**
+- [x] **Step 1: Mark `docmux-reader-latex` as complete**
 
 Change:
 ```markdown
@@ -1435,11 +1435,11 @@ To:
 
 (Replace `N` with the actual test count.)
 
-- [ ] **Step 2: Update the total test count**
+- [x] **Step 2: Update the total test count**
 
 Update the "Total:" line to reflect the new test count.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add ROADMAP.md
