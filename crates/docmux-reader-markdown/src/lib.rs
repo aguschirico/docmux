@@ -434,6 +434,7 @@ impl Reader for MarkdownReader {
             metadata,
             content,
             bibliography: None,
+            warnings: vec![],
         })
     }
 }

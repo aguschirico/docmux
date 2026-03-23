@@ -17,12 +17,21 @@ use std::collections::HashMap;
 
 // ─── Document ────────────────────────────────────────────────────────────────
 
+/// A diagnostic warning emitted during parsing (e.g. unrecognized commands).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParseWarning {
+    pub line: usize,
+    pub message: String,
+}
+
 /// A complete document: metadata + content + optional bibliography.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Document {
     pub metadata: Metadata,
     pub content: Vec<Block>,
     pub bibliography: Option<Bibliography>,
+    #[serde(default)]
+    pub warnings: Vec<ParseWarning>,
 }
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
@@ -442,6 +451,7 @@ mod tests {
                 },
             ],
             bibliography: None,
+            warnings: vec![],
         };
 
         assert_eq!(doc.content.len(), 3);
@@ -512,6 +522,7 @@ mod tests {
             },
             content: vec![Block::text("Hello")],
             bibliography: None,
+            warnings: vec![],
         };
 
         let json = serde_json::to_string(&doc).expect("serialize");
