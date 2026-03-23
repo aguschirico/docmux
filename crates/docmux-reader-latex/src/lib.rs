@@ -1,4 +1,8 @@
 //! # docmux-reader-latex
 //!
-//! Part of docmux — universal document converter.
-//! This crate is a placeholder for future implementation.
+//! LaTeX reader for docmux. Parses a practical subset of LaTeX into the
+//! docmux AST using a hand-written recursive descent parser.
+
+pub(crate) mod unescape;
+
+pub use unescape::unescape_latex;
