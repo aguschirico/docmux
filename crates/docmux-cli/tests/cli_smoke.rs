@@ -116,6 +116,48 @@ fn explicit_format_flags() {
     assert!(stdout.contains("<p>"));
 }
 
+#[test]
+fn converts_latex_to_html_stdout() {
+    let input = fixtures_dir().join("basic/latex-paragraph.tex");
+    let output = Command::new(docmux_bin())
+        .arg(&input)
+        .arg("--to")
+        .arg("html")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(
+        output.status.success(),
+        "docmux exited with error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<strong>bold</strong>"),
+        "Expected bold in output, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("<em>italic</em>"),
+        "Expected italic in output, got: {stdout}"
+    );
+}
+
+#[test]
+fn latex_auto_detects_format_by_extension() {
+    let input = fixtures_dir().join("basic/latex-paragraph.tex");
+    let output = Command::new(docmux_bin())
+        .arg(&input)
+        .arg("--to")
+        .arg("html")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("<p>"), "Expected HTML paragraph output");
+}
+
 // ─── Error cases ────────────────────────────────────────────────────────────
 
 #[test]
