@@ -4,7 +4,9 @@
 //! docmux AST using a hand-written recursive descent parser.
 
 pub(crate) mod lexer;
+pub(crate) mod parser;
 pub(crate) mod unescape;
 
 pub use lexer::{tokenize, Token};
+pub use parser::Parser;
 pub use unescape::unescape_latex;
