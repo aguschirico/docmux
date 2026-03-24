@@ -22,7 +22,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/docmux/docmux"
+repository = "https://github.com/aguschirico/docmux"
 description = "Universal document converter — MIT licensed, WASM-first"
 rust-version = "1.75"
 

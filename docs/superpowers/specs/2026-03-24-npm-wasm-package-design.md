@@ -62,7 +62,7 @@ npm/
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/docmux/docmux"
+    "url": "https://github.com/aguschirico/docmux"
   },
   "type": "module",
   "main": "./pkg/docmux_wasm.js",
