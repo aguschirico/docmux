@@ -1,0 +1,5 @@
+Inline math: $x^2 + y^2 = z^2$ in a sentence.
+
+Display math:
+
+$ E = m c^2 $

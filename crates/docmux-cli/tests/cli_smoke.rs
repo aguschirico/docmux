@@ -158,6 +158,71 @@ fn latex_auto_detects_format_by_extension() {
     assert!(stdout.contains("<p>"), "Expected HTML paragraph output");
 }
 
+// ─── Typst smoke tests ──────────────────────────────────────────────────────
+
+#[test]
+fn converts_typst_to_html_stdout() {
+    let tmp = std::env::temp_dir().join("docmux-test");
+    std::fs::create_dir_all(&tmp).ok();
+    let input_file = tmp.join("test.typ");
+    std::fs::write(&input_file, "= Hello\n\nWorld.").unwrap();
+
+    let output = Command::new(docmux_bin())
+        .arg(&input_file)
+        .arg("--to")
+        .arg("html")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(
+        output.status.success(),
+        "docmux exited with error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<h1>"),
+        "Expected heading in output, got: {stdout}"
+    );
+}
+
+#[test]
+fn converts_typst_to_latex_stdout() {
+    let tmp = std::env::temp_dir().join("docmux-test");
+    std::fs::create_dir_all(&tmp).ok();
+    let input_file = tmp.join("test.typ");
+    std::fs::write(&input_file, "= Hello\n\n*Bold* and _italic_.").unwrap();
+
+    let output = Command::new(docmux_bin())
+        .arg(&input_file)
+        .arg("--to")
+        .arg("latex")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\\section"), "Expected LaTeX section");
+}
+
+#[test]
+fn typst_format_autodetected() {
+    let tmp = std::env::temp_dir().join("docmux-test");
+    std::fs::create_dir_all(&tmp).ok();
+    let input_file = tmp.join("autodetect.typ");
+    std::fs::write(&input_file, "Hello world.").unwrap();
+
+    let output = Command::new(docmux_bin())
+        .arg(&input_file)
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(
+        output.status.success(),
+        "Typst format should be auto-detected from .typ extension"
+    );
+}
+
 // ─── Error cases ────────────────────────────────────────────────────────────
 
 #[test]
