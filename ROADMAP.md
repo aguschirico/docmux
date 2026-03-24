@@ -1,6 +1,6 @@
 # docmux Roadmap
 
-> Last updated: 2026-03-23
+> Last updated: 2026-03-24
 
 ## Phase 1 — MVP (Markdown → HTML + LaTeX) ✅
 
@@ -15,22 +15,22 @@
 - [x] Fix display math bug (`$$...$$` promoted from inline to `Block::MathBlock`)
 - [x] Golden file test harness (13 fixtures × 2 formats = 26 golden files)
 - [x] `docmux-transform-crossref` — auto-number figures, tables, equations; resolve `CrossRef` nodes (7 tests)
+- [x] `docmux-reader-latex` — recursive descent LaTeX parser, preamble extraction, best-effort with warnings (53 tests)
 
 **Total: 111 tests | clippy clean | fmt clean | CI green**
 
-## Phase 2 — Ecosystem
-
-- [x] `docmux-reader-latex` — recursive descent LaTeX parser, preamble extraction, best-effort with warnings (53 tests)
-- [ ] `npm/` package setup — publishable `@docmux/wasm` with JS/TS wrapper
-- [ ] `docmux-transform-cite` — basic CSL citation resolution
-- [ ] `docmux-transform-math` — normalize math notation across formats (KaTeX ↔ MathJax ↔ raw)
-
-## Phase 3 — Modern Formats
+## Phase 2 — Format Coverage
 
 - [ ] `docmux-reader-typst` — Typst markup parser
 - [ ] `docmux-writer-typst` — Typst output
 - [ ] `docmux-reader-myst` — MyST Markdown (directives, roles, cross-refs)
 - [ ] `docmux-writer-docx` — OOXML output via zip + XML generation
+
+## Phase 3 — Transforms & Packaging
+
+- [ ] `docmux-transform-cite` — basic CSL citation resolution
+- [ ] `docmux-transform-math` — normalize math notation across formats (KaTeX ↔ MathJax ↔ raw)
+- [ ] `npm/` package setup — publishable `@docmux/wasm` with JS/TS wrapper (spec ready: `docs/superpowers/specs/2026-03-24-npm-wasm-package-design.md`)
 
 ## Phase 4 — Production Readiness
 
