@@ -45,13 +45,13 @@
 ### Pandoc parity — Markdown reader
 
 - [x] Auto-generate GFM-style heading IDs (slugify, dedup, 4 tests)
-- [ ] Header attributes `{#id .class key=val}` (pandoc extension)
-- [ ] Fenced code attributes `` ```{.python .numberLines} `` (pandoc extension)
+- [x] Header attributes `{#id .class key=val}` (pandoc extension, 7 tests)
+- [x] Fenced code attributes `` ```{.python .numberLines} `` (pandoc extension, 5 tests)
 
 ### Format coverage
 
 - [x] `docmux-reader-typst` — Typst markup parser (81 tests)
-- [ ] `docmux-writer-typst` — Typst output
+- [x] `docmux-writer-typst` — Typst output (16 unit tests, 4 golden files)
 - [ ] `docmux-reader-myst` — MyST Markdown (directives, roles, cross-refs; needs `Div`)
 
 ## Phase 3 — Production Features

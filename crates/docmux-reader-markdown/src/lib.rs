@@ -151,26 +151,62 @@ impl MarkdownReader {
                 Some(Block::Paragraph { content })
             }
             NodeValue::Heading(h) => {
-                let content = self.collect_inlines(node);
+                let mut content = self.collect_inlines(node);
+                let parsed_attrs = extract_trailing_attrs(&mut content);
+                let id = parsed_attrs.as_ref().and_then(|a| a.id.clone());
+                // Only store attrs if there are classes or key-values
+                // (the id is already on Heading.id)
+                let attrs = parsed_attrs.and_then(|a| {
+                    if a.classes.is_empty() && a.key_values.is_empty() {
+                        None
+                    } else {
+                        Some(Attributes {
+                            id: None,
+                            classes: a.classes,
+                            key_values: a.key_values,
+                        })
+                    }
+                });
                 Some(Block::Heading {
                     level: h.level,
-                    id: None, // Could compute from content
+                    id,
                     content,
-                    attrs: None,
+                    attrs,
                 })
             }
             NodeValue::CodeBlock(cb) => {
-                let language = if cb.info.is_empty() {
-                    None
+                let info = cb.info.trim();
+                let (language, attrs) = if info.starts_with('{') {
+                    // Pandoc-style fenced code attributes: ```{.python .numberLines}
+                    match parse_attr_block(info) {
+                        Some(a) => {
+                            let lang = a.classes.first().cloned();
+                            let attrs = Some(a);
+                            (lang, attrs)
+                        }
+                        None => {
+                            // Failed to parse as attrs — treat whole info as language
+                            let lang = if info.is_empty() {
+                                None
+                            } else {
+                                Some(info.to_string())
+                            };
+                            (lang, None)
+                        }
+                    }
+                } else if info.is_empty() {
+                    (None, None)
                 } else {
-                    Some(cb.info.clone())
+                    // Standard info string: first word is language
+                    let lang = info.split_whitespace().next().map(String::from);
+                    (lang, None)
                 };
                 Some(Block::CodeBlock {
                     language,
                     content: cb.literal.clone(),
                     caption: None,
                     label: None,
-                    attrs: None,
+                    attrs,
                 })
             }
             NodeValue::BlockQuote => {
@@ -461,7 +497,10 @@ fn auto_id_walk(blocks: &mut [Block], seen: &mut HashSet<String>) {
     for block in blocks.iter_mut() {
         match block {
             Block::Heading { id, content, .. } => {
-                if id.is_none() {
+                if let Some(ref existing) = id {
+                    // Register explicit IDs so auto-generated ones don't collide
+                    seen.insert(existing.clone());
+                } else {
                     let slug = slugify_inlines(content);
                     if !slug.is_empty() {
                         *id = Some(dedup_slug(slug, seen));
@@ -554,6 +593,124 @@ fn dedup_slug(slug: String, seen: &mut HashSet<String>) -> String {
         }
         n += 1;
     }
+}
+
+// ─── Pandoc-style attribute parsing ──────────────────────────────────────────
+
+/// Parse a pandoc-style attribute block: `{#id .class1 .class2 key=val key2="quoted"}`.
+///
+/// Returns `None` if the string is not a well-formed attribute block (i.e., it
+/// contains tokens that aren't `#id`, `.class`, or `key=val`).
+fn parse_attr_block(s: &str) -> Option<Attributes> {
+    let s = s.trim();
+    if !s.starts_with('{') || !s.ends_with('}') {
+        return None;
+    }
+    let inner = s[1..s.len() - 1].trim();
+    if inner.is_empty() {
+        return Some(Attributes::default());
+    }
+
+    let mut attrs = Attributes::default();
+    let tokens = tokenize_attr_block(inner);
+    if tokens.is_empty() {
+        return Some(Attributes::default());
+    }
+
+    for token in &tokens {
+        if let Some(id) = token.strip_prefix('#') {
+            if id.is_empty() {
+                return None;
+            }
+            attrs.id = Some(id.to_string());
+        } else if let Some(class) = token.strip_prefix('.') {
+            if class.is_empty() {
+                return None;
+            }
+            attrs.classes.push(class.to_string());
+        } else if let Some((key, val)) = token.split_once('=') {
+            if key.is_empty() {
+                return None;
+            }
+            let val = val.trim_matches('"');
+            attrs.key_values.insert(key.to_string(), val.to_string());
+        } else {
+            // Token doesn't match any valid pattern → not an attribute block
+            return None;
+        }
+    }
+
+    Some(attrs)
+}
+
+/// Split an attribute block's inner content into tokens, respecting quoted values.
+///
+/// `#id .class key="value with spaces"` → `["#id", ".class", "key=\"value with spaces\""]`
+fn tokenize_attr_block(s: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for c in s.chars() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+            current.push(c);
+        } else if c.is_whitespace() && !in_quotes {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Check if the last inline in `content` ends with a `{...}` attribute block.
+/// If found, parse it, strip it from the content, and return the attributes.
+fn extract_trailing_attrs(content: &mut Vec<Inline>) -> Option<Attributes> {
+    // Check if the last inline is a Text node with a trailing attr block
+    let attr_result = if let Some(Inline::Text { value }) = content.last() {
+        if let Some(brace_start) = value.rfind('{') {
+            let candidate = &value[brace_start..];
+            if candidate.ends_with('}') {
+                // Normalize smart quotes (comrak replaces " with \u{201c}/\u{201d}
+                // when opts.parse.smart is enabled)
+                let normalized = normalize_smart_quotes(candidate);
+                parse_attr_block(&normalized).map(|attrs| {
+                    let remaining = value[..brace_start].trim_end().to_string();
+                    (attrs, remaining)
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    if let Some((attrs, remaining)) = attr_result {
+        if remaining.is_empty() {
+            content.pop();
+        } else if let Some(Inline::Text { value }) = content.last_mut() {
+            *value = remaining;
+        }
+        Some(attrs)
+    } else {
+        None
+    }
+}
+
+/// Replace Unicode smart quotes with ASCII equivalents so the attribute parser
+/// can handle values quoted with curly quotes produced by comrak's smart mode.
+fn normalize_smart_quotes(s: &str) -> String {
+    s.replace(['\u{201c}', '\u{201d}'], "\"") // left/right double
+        .replace(['\u{2018}', '\u{2019}'], "'") // left/right single
 }
 
 // ─── YAML frontmatter helpers ────────────────────────────────────────────────
@@ -912,5 +1069,258 @@ mod tests {
             }
             other => panic!("Expected Heading, got {:?}", other),
         }
+    }
+
+    // ─── Header attribute tests ─────────────────────────────────────────────
+
+    #[test]
+    fn heading_explicit_id() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# Hello {#custom-id}").unwrap();
+        match &doc.content[0] {
+            Block::Heading {
+                id, content, attrs, ..
+            } => {
+                assert_eq!(id.as_deref(), Some("custom-id"));
+                // Content should not include the attr block
+                assert_eq!(content.len(), 1);
+                if let Inline::Text { value } = &content[0] {
+                    assert_eq!(value, "Hello");
+                } else {
+                    panic!("Expected Text, got {:?}", content[0]);
+                }
+                // No classes or key-values → attrs is None
+                assert!(attrs.is_none());
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn heading_class_attr() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# Warning {.warning}").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, attrs, .. } => {
+                // No explicit #id → auto-generated
+                assert_eq!(id.as_deref(), Some("warning"));
+                let a = attrs.as_ref().expect("should have attrs");
+                assert_eq!(a.classes, vec!["warning"]);
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn heading_full_attrs() {
+        let reader = MarkdownReader::new();
+        let doc = reader
+            .read("# Section {#sec-intro .important lang=en}")
+            .unwrap();
+        match &doc.content[0] {
+            Block::Heading {
+                id, content, attrs, ..
+            } => {
+                assert_eq!(id.as_deref(), Some("sec-intro"));
+                if let Inline::Text { value } = &content[0] {
+                    assert_eq!(value, "Section");
+                }
+                let a = attrs.as_ref().expect("should have attrs");
+                assert_eq!(a.classes, vec!["important"]);
+                assert_eq!(a.key_values.get("lang").unwrap(), "en");
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn heading_curly_braces_not_attrs() {
+        // {world} isn't a valid attr block (no #, ., or key=val)
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# Hello {world}").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, content, .. } => {
+                // Should auto-generate ID from full text including {world}
+                assert!(id.is_some());
+                // Content should still include the curly braces
+                if let Inline::Text { value } = &content[0] {
+                    assert!(value.contains("{world}"));
+                }
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn heading_bold_with_attrs() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# **Bold** heading {#bold-heading}").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, content, .. } => {
+                assert_eq!(id.as_deref(), Some("bold-heading"));
+                // First inline should be Strong
+                assert!(matches!(&content[0], Inline::Strong { .. }));
+                // Remaining text should be " heading" (no attr block)
+                if let Inline::Text { value } = &content[1] {
+                    assert_eq!(value, " heading");
+                }
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn heading_explicit_id_dedup_with_auto() {
+        let reader = MarkdownReader::new();
+        // First heading has explicit id="intro", second auto-generates to "intro"
+        // → should become "intro-1"
+        let doc = reader.read("# First {#intro}\n\n## Intro").unwrap();
+        let ids: Vec<_> = doc
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                Block::Heading { id, .. } => id.as_deref(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, vec!["intro", "intro-1"]);
+    }
+
+    #[test]
+    fn heading_quoted_attr_value() {
+        let reader = MarkdownReader::new();
+        let doc = reader
+            .read("# Title {#tid data-note=\"some value here\"}")
+            .unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, attrs, .. } => {
+                assert_eq!(id.as_deref(), Some("tid"));
+                let a = attrs.as_ref().expect("should have attrs");
+                assert_eq!(a.key_values.get("data-note").unwrap(), "some value here");
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    // ─── Fenced code attribute tests ────────────────────────────────────────
+
+    #[test]
+    fn code_block_pandoc_attrs_language() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("```{.python}\nprint('hi')\n```").unwrap();
+        match &doc.content[0] {
+            Block::CodeBlock {
+                language, attrs, ..
+            } => {
+                assert_eq!(language.as_deref(), Some("python"));
+                let a = attrs.as_ref().expect("should have attrs");
+                assert_eq!(a.classes, vec!["python"]);
+            }
+            other => panic!("Expected CodeBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn code_block_pandoc_attrs_multiple_classes() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("```{.python .numberLines}\ncode\n```").unwrap();
+        match &doc.content[0] {
+            Block::CodeBlock {
+                language, attrs, ..
+            } => {
+                assert_eq!(language.as_deref(), Some("python"));
+                let a = attrs.as_ref().expect("should have attrs");
+                assert_eq!(a.classes, vec!["python", "numberLines"]);
+            }
+            other => panic!("Expected CodeBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn code_block_pandoc_attrs_full() {
+        let reader = MarkdownReader::new();
+        let doc = reader
+            .read("```{#my-code .python startFrom=\"5\"}\ncode\n```")
+            .unwrap();
+        match &doc.content[0] {
+            Block::CodeBlock {
+                language, attrs, ..
+            } => {
+                assert_eq!(language.as_deref(), Some("python"));
+                let a = attrs.as_ref().expect("should have attrs");
+                assert_eq!(a.id.as_deref(), Some("my-code"));
+                assert_eq!(a.classes, vec!["python"]);
+                assert_eq!(a.key_values.get("startFrom").unwrap(), "5");
+            }
+            other => panic!("Expected CodeBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn code_block_standard_info_unchanged() {
+        // Standard ```rust should still work
+        let reader = MarkdownReader::new();
+        let doc = reader.read("```rust\nfn main() {}\n```").unwrap();
+        match &doc.content[0] {
+            Block::CodeBlock {
+                language, attrs, ..
+            } => {
+                assert_eq!(language.as_deref(), Some("rust"));
+                assert!(attrs.is_none());
+            }
+            other => panic!("Expected CodeBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn code_block_empty_attrs() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("```{}\ncode\n```").unwrap();
+        match &doc.content[0] {
+            Block::CodeBlock {
+                language, attrs, ..
+            } => {
+                assert!(language.is_none());
+                // Empty attrs still produces Some(Attributes::default())
+                assert!(attrs.is_some());
+            }
+            other => panic!("Expected CodeBlock, got {:?}", other),
+        }
+    }
+
+    // ─── parse_attr_block unit tests ────────────────────────────────────────
+
+    #[test]
+    fn parse_attr_block_basic() {
+        let attrs = parse_attr_block("{#my-id .cls1 .cls2 k=v}").unwrap();
+        assert_eq!(attrs.id.as_deref(), Some("my-id"));
+        assert_eq!(attrs.classes, vec!["cls1", "cls2"]);
+        assert_eq!(attrs.key_values.get("k").unwrap(), "v");
+    }
+
+    #[test]
+    fn parse_attr_block_invalid_token() {
+        assert!(parse_attr_block("{world}").is_none());
+        assert!(parse_attr_block("{hello world}").is_none());
+    }
+
+    #[test]
+    fn parse_attr_block_empty() {
+        let attrs = parse_attr_block("{}").unwrap();
+        assert!(attrs.id.is_none());
+        assert!(attrs.classes.is_empty());
+    }
+
+    #[test]
+    fn parse_attr_block_quoted_value() {
+        let attrs = parse_attr_block("{key=\"value with spaces\"}").unwrap();
+        assert_eq!(attrs.key_values.get("key").unwrap(), "value with spaces");
+    }
+
+    #[test]
+    fn parse_attr_block_not_braces() {
+        assert!(parse_attr_block("no braces").is_none());
+        assert!(parse_attr_block("{unclosed").is_none());
+        assert!(parse_attr_block("unclosed}").is_none());
     }
 }
