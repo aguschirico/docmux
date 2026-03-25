@@ -428,8 +428,57 @@ impl TypstWriter {
         out.push('\n');
     }
 
-    fn wrap_standalone(&self, body: &str, _doc: &Document) -> String {
-        body.to_string()
+    fn wrap_standalone(&self, body: &str, doc: &Document) -> String {
+        let mut preamble = String::with_capacity(512);
+
+        let has_meta = doc.metadata.title.is_some()
+            || !doc.metadata.authors.is_empty()
+            || doc.metadata.date.is_some();
+
+        if has_meta {
+            preamble.push_str("#set document(\n");
+            if let Some(title) = &doc.metadata.title {
+                preamble.push_str(&format!("  title: \"{}\",\n", escape_typst_url(title)));
+            }
+            if !doc.metadata.authors.is_empty() {
+                let names: Vec<String> = doc
+                    .metadata
+                    .authors
+                    .iter()
+                    .map(|a| format!("\"{}\"", escape_typst_url(&a.name)))
+                    .collect();
+                if names.len() == 1 {
+                    preamble.push_str(&format!("  author: {},\n", names[0]));
+                } else {
+                    preamble.push_str(&format!("  author: ({}),\n", names.join(", ")));
+                }
+            }
+            if let Some(date) = &doc.metadata.date {
+                let parts: Vec<&str> = date.split('-').collect();
+                if parts.len() == 3
+                    && parts[0].parse::<u32>().is_ok()
+                    && parts[1].parse::<u32>().is_ok()
+                    && parts[2].parse::<u32>().is_ok()
+                {
+                    preamble.push_str(&format!(
+                        "  date: datetime(year: {}, month: {}, day: {}),\n",
+                        parts[0], parts[1], parts[2]
+                    ));
+                } else {
+                    preamble.push_str(&format!("  date: \"{}\",\n", escape_typst_url(date)));
+                }
+            }
+            preamble.push_str(")\n\n");
+        }
+
+        if let Some(abstract_text) = &doc.metadata.abstract_text {
+            preamble.push_str("#quote(block: true)[\n");
+            preamble.push_str(&escape_typst(abstract_text));
+            preamble.push_str("\n]\n\n");
+        }
+
+        preamble.push_str(body);
+        preamble
     }
 }
 
@@ -738,5 +787,35 @@ mod tests {
         assert!(typ.contains("#footnote[This is the footnote.]"));
         // FootnoteDef should not appear as a separate block
         assert!(!typ.contains("fn1"));
+    }
+
+    #[test]
+    fn standalone_mode() {
+        let doc = Document {
+            metadata: Metadata {
+                title: Some("My Paper".into()),
+                authors: vec![Author {
+                    name: "Jane Doe".into(),
+                    affiliation: Some("MIT".into()),
+                    email: None,
+                    orcid: None,
+                }],
+                date: Some("2026-03-25".into()),
+                abstract_text: Some("This paper is about things.".into()),
+                ..Default::default()
+            },
+            content: vec![Block::text("Body text.")],
+            ..Default::default()
+        };
+        let writer = TypstWriter::new();
+        let opts = WriteOptions {
+            standalone: true,
+            ..Default::default()
+        };
+        let typ = writer.write(&doc, &opts).unwrap();
+        assert!(typ.contains("#set document("));
+        assert!(typ.contains("title: \"My Paper\""));
+        assert!(typ.contains("Jane Doe"));
+        assert!(typ.contains("Body text."));
     }
 }
