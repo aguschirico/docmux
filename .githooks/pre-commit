@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── docmux pre-commit hook ─────────────────────────────────────────
+# Runs quality gates based on which files were staged.
+# Bypass with: git commit --no-verify (not recommended)
+# ─────────────────────────────────────────────────────────────────────
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+# ─── Detect what changed ────────────────────────────────────────────
+RUST_CHANGED=false
+TS_CHANGED=false
+WASM_CHANGED=false
+
+while IFS= read -r file; do
+    case "$file" in
+        crates/docmux-wasm/*) WASM_CHANGED=true; RUST_CHANGED=true ;;
+        *.rs) RUST_CHANGED=true ;;
+        playground/*.ts|playground/*.tsx) TS_CHANGED=true ;;
+    esac
+done <<< "$STAGED"
+
+ERRORS=0
+WARNINGS=0
+
+pass()    { echo -e "  ${GREEN}✓${NC} $1"; }
+fail()    { echo -e "  ${RED}✗${NC} $1"; ERRORS=$((ERRORS + 1)); }
+warn()    { echo -e "  ${YELLOW}⚠${NC} $1"; WARNINGS=$((WARNINGS + 1)); }
+section() { echo -e "\n${BLUE}${BOLD}[$1]${NC}"; }
+
+# ─── Rust checks ────────────────────────────────────────────────────
+if [ "$RUST_CHANGED" = true ]; then
+    section "Rust"
+
+    # Format
+    if cargo fmt --all -- --check >/dev/null 2>&1; then
+        pass "cargo fmt"
+    else
+        fail "cargo fmt — run 'cargo fmt --all' to fix"
+    fi
+
+    # Clippy (includes cargo check)
+    if cargo clippy --workspace --all-targets -- -D warnings 2>&1 | grep -q "^error"; then
+        fail "cargo clippy — see warnings above"
+    else
+        pass "cargo clippy"
+    fi
+
+    # Tests
+    if cargo test --workspace 2>&1 | grep -qE "^test result:.*FAILED|error\["; then
+        fail "cargo test — tests are failing"
+    else
+        pass "cargo test"
+    fi
+
+    # unwrap() in lib code (staged additions only, warn-only)
+    UNWRAP_FILES=""
+    while IFS= read -r file; do
+        if [[ "$file" == *.rs ]] && [[ "$file" != */tests/* ]] && [[ "$file" != */tests.rs ]]; then
+            if git diff --cached -- "$file" | grep '^\+' | grep -v '^\+\+\+' | grep -v '#\[cfg(test)\]' | grep -q '\.unwrap()'; then
+                UNWRAP_FILES="$UNWRAP_FILES $file"
+            fi
+        fi
+    done <<< "$STAGED"
+    if [ -n "$UNWRAP_FILES" ]; then
+        warn "unwrap() in staged additions —$UNWRAP_FILES (verify it's in test code)"
+    else
+        pass "no unwrap() in lib code"
+    fi
+fi
+
+# ─── WASM check ─────────────────────────────────────────────────────
+if [ "$WASM_CHANGED" = true ]; then
+    section "WASM"
+
+    if cargo build --target wasm32-unknown-unknown -p docmux-wasm 2>/dev/null; then
+        pass "wasm32 build"
+    else
+        fail "wasm32 build — WASM crate doesn't compile"
+    fi
+fi
+
+# ─── TypeScript / Playground checks ─────────────────────────────────
+if [ "$TS_CHANGED" = true ]; then
+    section "Playground (TypeScript)"
+
+    # Type check
+    if (cd playground && pnpm exec tsc --noEmit 2>/dev/null); then
+        pass "tsc --noEmit"
+    else
+        fail "tsc — type errors found"
+    fi
+
+    # ESLint
+    if (cd playground && pnpm run lint 2>/dev/null); then
+        pass "eslint"
+    else
+        fail "eslint — lint errors found"
+    fi
+
+    # No `any` types in staged additions
+    ANY_FILES=""
+    while IFS= read -r file; do
+        if [[ "$file" == *.ts || "$file" == *.tsx ]]; then
+            if git diff --cached -- "$file" | grep '^\+' | grep -v '^\+\+\+' | grep -qE ':\s*any\b|<any>|as any\b'; then
+                ANY_FILES="$ANY_FILES $file"
+            fi
+        fi
+    done <<< "$STAGED"
+    if [ -n "$ANY_FILES" ]; then
+        fail "any type used in:$ANY_FILES — use proper typing"
+    else
+        pass "no 'any' types"
+    fi
+
+    # Component size check (>150 lines)
+    BIG_COMPONENTS=""
+    while IFS= read -r file; do
+        if [[ "$file" == *.tsx ]]; then
+            LINES=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
+            if [ "$LINES" -gt 150 ] 2>/dev/null; then
+                BIG_COMPONENTS="$BIG_COMPONENTS $file($LINES)"
+            fi
+        fi
+    done <<< "$STAGED"
+    if [ -n "$BIG_COMPONENTS" ]; then
+        warn "components >150 lines:$BIG_COMPONENTS — consider extracting"
+    else
+        pass "component size ≤150 lines"
+    fi
+fi
+
+# ─── Summary ─────────────────────────────────────────────────────────
+echo ""
+if [ $ERRORS -gt 0 ]; then
+    echo -e "${RED}${BOLD}✗ Pre-commit failed${NC} — $ERRORS error(s), $WARNINGS warning(s)"
+    echo -e "${YELLOW}  Fix issues before committing. Use --no-verify to bypass.${NC}"
+    exit 1
+elif [ $WARNINGS -gt 0 ]; then
+    echo -e "${GREEN}${BOLD}✓ Pre-commit passed${NC} — $WARNINGS warning(s)"
+else
+    echo -e "${GREEN}${BOLD}✓ All checks passed${NC}"
+fi
