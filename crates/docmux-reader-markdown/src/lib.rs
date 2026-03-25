@@ -13,7 +13,7 @@ use comrak::{
 };
 use docmux_ast::*;
 use docmux_core::{Reader, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A Markdown reader backed by comrak.
 #[derive(Debug, Default)]
@@ -434,7 +434,10 @@ impl Reader for MarkdownReader {
 
         // Extract frontmatter before converting content
         let metadata = self.extract_frontmatter(root);
-        let content = self.convert_node(root);
+        let mut content = self.convert_node(root);
+
+        // Auto-generate heading IDs (GFM-style slugification)
+        auto_id_headings(&mut content);
 
         Ok(Document {
             metadata,
@@ -442,6 +445,114 @@ impl Reader for MarkdownReader {
             bibliography: None,
             warnings: vec![],
         })
+    }
+}
+
+// ─── Heading auto-ID (GFM-style) ────────────────────────────────────────────
+
+/// Walk blocks and assign GFM-style IDs to headings that don't already have one.
+/// Duplicate slugs get a `-1`, `-2`, … suffix.
+fn auto_id_headings(blocks: &mut [Block]) {
+    let mut seen = HashSet::new();
+    auto_id_walk(blocks, &mut seen);
+}
+
+fn auto_id_walk(blocks: &mut [Block], seen: &mut HashSet<String>) {
+    for block in blocks.iter_mut() {
+        match block {
+            Block::Heading { id, content, .. } => {
+                if id.is_none() {
+                    let slug = slugify_inlines(content);
+                    if !slug.is_empty() {
+                        *id = Some(dedup_slug(slug, seen));
+                    }
+                }
+            }
+            Block::BlockQuote { content } => auto_id_walk(content, seen),
+            Block::List { items, .. } => {
+                for item in items {
+                    auto_id_walk(&mut item.content, seen);
+                }
+            }
+            Block::Admonition { content, .. } => auto_id_walk(content, seen),
+            Block::Div { content, .. } => auto_id_walk(content, seen),
+            Block::FootnoteDef { content, .. } => auto_id_walk(content, seen),
+            _ => {}
+        }
+    }
+}
+
+/// Convert inlines to a GFM-style slug:
+/// 1. Flatten to plain text (lowercase)
+/// 2. Replace spaces/underscores with hyphens
+/// 3. Strip anything that isn't alphanumeric or hyphen
+/// 4. Collapse consecutive hyphens
+fn slugify_inlines(inlines: &[Inline]) -> String {
+    let mut text = String::new();
+    collect_plain_text(inlines, &mut text);
+
+    let slug: String = text
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            ' ' | '_' => '-',
+            c if c.is_alphanumeric() || c == '-' => c,
+            _ => '\0',
+        })
+        .filter(|&c| c != '\0')
+        .collect();
+
+    // Collapse consecutive hyphens and trim
+    let mut result = String::with_capacity(slug.len());
+    let mut prev_hyphen = false;
+    for c in slug.chars() {
+        if c == '-' {
+            if !prev_hyphen && !result.is_empty() {
+                result.push('-');
+            }
+            prev_hyphen = true;
+        } else {
+            result.push(c);
+            prev_hyphen = false;
+        }
+    }
+    result.trim_end_matches('-').to_string()
+}
+
+/// Recursively collect plain text from inlines.
+fn collect_plain_text(inlines: &[Inline], out: &mut String) {
+    for inline in inlines {
+        match inline {
+            Inline::Text { value } => out.push_str(value),
+            Inline::Code { value } => out.push_str(value),
+            Inline::MathInline { value } => out.push_str(value),
+            Inline::Emphasis { content }
+            | Inline::Strong { content }
+            | Inline::Strikethrough { content }
+            | Inline::Superscript { content }
+            | Inline::Subscript { content }
+            | Inline::SmallCaps { content }
+            | Inline::Underline { content }
+            | Inline::Link { content, .. }
+            | Inline::Span { content, .. } => collect_plain_text(content, out),
+            Inline::SoftBreak | Inline::HardBreak => out.push(' '),
+            _ => {}
+        }
+    }
+}
+
+/// Ensure uniqueness: if slug is already seen, append `-1`, `-2`, etc.
+fn dedup_slug(slug: String, seen: &mut HashSet<String>) -> String {
+    if seen.insert(slug.clone()) {
+        return slug;
+    }
+    let mut n = 1u32;
+    loop {
+        let candidate = format!("{slug}-{n}");
+        if seen.insert(candidate.clone()) {
+            return candidate;
+        }
+        n += 1;
     }
 }
 
@@ -748,5 +859,58 @@ mod tests {
         let doc = reader.read("Just a paragraph.").unwrap();
         assert!(doc.metadata.title.is_none());
         assert!(doc.metadata.authors.is_empty());
+    }
+
+    // ─── Auto-ID tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn heading_gets_auto_id() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# Hello World").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, .. } => {
+                assert_eq!(id.as_deref(), Some("hello-world"));
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn heading_id_strips_punctuation() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# Section 1.2: Methods & Results!").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, .. } => {
+                assert_eq!(id.as_deref(), Some("section-12-methods-results"));
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn duplicate_headings_get_suffix() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# Intro\n\n## Intro\n\n### Intro").unwrap();
+        let ids: Vec<_> = doc
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                Block::Heading { id, .. } => id.as_deref(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, vec!["intro", "intro-1", "intro-2"]);
+    }
+
+    #[test]
+    fn heading_with_inline_formatting_slugifies() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("# **Bold** and *italic*").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, .. } => {
+                assert_eq!(id.as_deref(), Some("bold-and-italic"));
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
     }
 }

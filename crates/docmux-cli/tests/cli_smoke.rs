@@ -70,7 +70,7 @@ fn converts_to_file_output() {
     assert!(output_file.exists(), "Output file was not created");
 
     let html = std::fs::read_to_string(&output_file).expect("read output");
-    assert!(html.contains("<h1>"), "Expected h1 in output");
+    assert!(html.contains("<h1"), "Expected h1 in output");
 
     // Clean up
     let _ = std::fs::remove_file(&output_file);
