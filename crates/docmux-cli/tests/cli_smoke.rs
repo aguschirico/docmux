@@ -243,7 +243,10 @@ fn converts_typst_to_typst_stdout() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("= Hello"), "Expected Typst heading in output");
+    assert!(
+        stdout.contains("= Hello"),
+        "Expected Typst heading in output"
+    );
     assert!(stdout.contains("*Bold*"), "Expected bold markup");
 }
 
