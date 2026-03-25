@@ -131,7 +131,7 @@ impl HtmlWriter {
                 out.push_str(&format!(
                     "<img src=\"{}\" alt=\"{}\">",
                     escape_attr(&image.url),
-                    escape_attr(&image.alt)
+                    escape_attr(&image.alt_text())
                 ));
                 if let Some(cap) = caption {
                     out.push_str("<figcaption>");
@@ -261,7 +261,22 @@ impl HtmlWriter {
             }
             out.push_str("</tr>\n");
         }
-        out.push_str("</tbody>\n</table>\n");
+        out.push_str("</tbody>\n");
+
+        if let Some(foot) = &table.foot {
+            out.push_str("<tfoot>\n<tr>");
+            for (i, cell) in foot.iter().enumerate() {
+                let align = table
+                    .columns
+                    .get(i)
+                    .map(|c| &c.alignment)
+                    .unwrap_or(&Alignment::Default);
+                self.write_td(cell, align, opts, out);
+            }
+            out.push_str("</tr>\n</tfoot>\n");
+        }
+
+        out.push_str("</table>\n");
     }
 
     fn write_th(&self, cell: &TableCell, align: &Alignment, opts: &WriteOptions, out: &mut String) {
@@ -322,7 +337,7 @@ impl HtmlWriter {
                 self.write_inlines(content, opts, out);
                 out.push_str("</del>");
             }
-            Inline::Code { value } => {
+            Inline::Code { value, .. } => {
                 out.push_str("<code>");
                 out.push_str(&escape_html(value));
                 out.push_str("</code>");
@@ -341,6 +356,7 @@ impl HtmlWriter {
                 url,
                 title,
                 content,
+                ..
             } => {
                 out.push_str(&format!("<a href=\"{}\"", escape_attr(url)));
                 if let Some(t) = title {
@@ -354,7 +370,7 @@ impl HtmlWriter {
                 out.push_str(&format!(
                     "<img src=\"{}\" alt=\"{}\"",
                     escape_attr(&img.url),
-                    escape_attr(&img.alt)
+                    escape_attr(&img.alt_text())
                 ));
                 if let Some(t) = &img.title {
                     out.push_str(&format!(" title=\"{}\"", escape_attr(t)));
@@ -364,7 +380,7 @@ impl HtmlWriter {
             Inline::Citation(cite) => {
                 // Placeholder rendering — transforms should resolve this first
                 out.push_str("<cite>");
-                out.push_str(&cite.keys.join("; "));
+                out.push_str(&cite.keys().join("; "));
                 out.push_str("</cite>");
             }
             Inline::FootnoteRef { id } => {
@@ -411,6 +427,18 @@ impl HtmlWriter {
                 out.push_str("<u>");
                 self.write_inlines(content, opts, out);
                 out.push_str("</u>");
+            }
+            Inline::Quoted {
+                quote_type,
+                content,
+            } => {
+                let (open, close) = match quote_type {
+                    QuoteType::SingleQuote => ("&lsquo;", "&rsquo;"),
+                    QuoteType::DoubleQuote => ("&ldquo;", "&rdquo;"),
+                };
+                out.push_str(open);
+                self.write_inlines(content, opts, out);
+                out.push_str(close);
             }
             Inline::Span { content, attrs } => {
                 let mut attr_str = String::new();

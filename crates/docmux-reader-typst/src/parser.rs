@@ -1,8 +1,8 @@
 use crate::lexer::Token;
 use docmux_ast::{
-    Alignment, Author, Block, Citation, CitationMode, ColumnSpec, CrossRef, DefinitionItem,
-    Document, Image, Inline, ListItem, MetaValue, Metadata, ParseWarning, RefForm, Table,
-    TableCell,
+    Alignment, Author, Block, Citation, CitationMode, CiteItem, ColumnSpec, CrossRef,
+    DefinitionItem, Document, Image, Inline, ListItem, MetaValue, Metadata, ParseWarning, RefForm,
+    Table, TableCell,
 };
 use std::collections::HashMap;
 
@@ -192,7 +192,11 @@ impl Parser {
                     metadata.date = yaml_value_to_string(val);
                 }
                 "abstract" | "abstract_text" | "description" => {
-                    metadata.abstract_text = val.as_str().map(String::from);
+                    metadata.abstract_text = val.as_str().map(|s| {
+                        vec![Block::Paragraph {
+                            content: vec![Inline::text(s)],
+                        }]
+                    });
                 }
                 "keywords" | "tags" => {
                     metadata.keywords = parse_string_list(val);
@@ -880,7 +884,7 @@ impl Parser {
             Token::Backtick { count: 1 } => {
                 self.advance(); // consume opening `
                 let value = self.collect_raw_text_until_backtick();
-                Some(Inline::Code { value })
+                Some(Inline::Code { value, attrs: None })
             }
 
             Token::Dollar => {
@@ -1495,11 +1499,18 @@ impl Parser {
             })
             .unwrap_or_default();
 
+        let alt = if alt.is_empty() {
+            vec![]
+        } else {
+            vec![Inline::text(alt)]
+        };
+
         Block::Figure {
             image: Image {
                 url,
                 alt,
                 title: None,
+                attrs: None,
             },
             caption: None,
             label: None,
@@ -1514,8 +1525,9 @@ impl Parser {
         // Extract image from a nested image() func call.
         let mut image = Image {
             url: String::new(),
-            alt: String::new(),
+            alt: vec![],
             title: None,
+            attrs: None,
         };
         let mut caption: Option<Vec<Inline>> = None;
         let mut label: Option<String> = None;
@@ -1535,7 +1547,11 @@ impl Parser {
                         Arg::Named(k, ArgValue::String(s)) if k == "alt" => Some(s.clone()),
                         _ => None,
                     }) {
-                        image.alt = alt;
+                        image.alt = if alt.is_empty() {
+                            vec![]
+                        } else {
+                            vec![Inline::text(alt)]
+                        };
                     }
                 }
                 Arg::Named(k, ArgValue::Content(tokens)) if k == "caption" => {
@@ -1635,6 +1651,7 @@ impl Parser {
             columns,
             header,
             rows,
+            foot: None,
             attrs: None,
         })
     }
@@ -1743,6 +1760,7 @@ impl Parser {
                     url,
                     title: None,
                     content,
+                    attrs: None,
                 })
             }
             "cite" => {
@@ -1764,9 +1782,11 @@ impl Parser {
                     .unwrap_or_default();
 
                 Some(Inline::Citation(Citation {
-                    keys: vec![key],
-                    prefix: None,
-                    suffix: None,
+                    items: vec![CiteItem {
+                        key,
+                        prefix: None,
+                        suffix: None,
+                    }],
                     mode: CitationMode::Normal,
                 }))
             }
@@ -1806,7 +1826,7 @@ impl Parser {
                     })
                     .unwrap_or_default();
 
-                Some(Inline::Code { value })
+                Some(Inline::Code { value, attrs: None })
             }
             _ => {
                 // Unknown inline function — consume args, emit warning + RawInline.
@@ -2206,7 +2226,7 @@ mod tests {
         let doc = parse("`some code`");
         match &doc.content[0] {
             Block::Paragraph { content } => {
-                assert!(matches!(&content[0], Inline::Code { value } if value == "some code"));
+                assert!(matches!(&content[0], Inline::Code { value, .. } if value == "some code"));
             }
             other => panic!("Expected Paragraph, got {:?}", other),
         }
@@ -2427,7 +2447,7 @@ mod tests {
         match &doc.content[0] {
             Block::Figure { image, caption, .. } => {
                 assert_eq!(image.url, "fig.png");
-                assert_eq!(image.alt, "A figure");
+                assert!(matches!(&image.alt[0], Inline::Text { value } if value == "A figure"));
                 assert!(caption.is_none());
             }
             other => panic!("Expected Figure, got {:?}", other),
@@ -2504,7 +2524,7 @@ mod tests {
         match &doc.content[0] {
             Block::Paragraph { content } => {
                 assert!(
-                    matches!(&content[0], Inline::Citation(Citation { keys, .. }) if keys[0] == "smith2020")
+                    matches!(&content[0], Inline::Citation(c) if c.items[0].key == "smith2020")
                 );
             }
             other => panic!("Expected Paragraph with Citation, got {:?}", other),
@@ -2555,7 +2575,7 @@ mod tests {
         let doc = parse("#raw(\"let x = 1\")");
         match &doc.content[0] {
             Block::Paragraph { content } => {
-                assert!(matches!(&content[0], Inline::Code { value } if value == "let x = 1"));
+                assert!(matches!(&content[0], Inline::Code { value, .. } if value == "let x = 1"));
             }
             other => panic!("Expected Paragraph with Code, got {:?}", other),
         }

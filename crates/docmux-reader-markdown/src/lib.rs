@@ -98,7 +98,13 @@ impl MarkdownReader {
                     metadata.date = yaml_value_to_string(val);
                 }
                 "abstract" | "abstract_text" | "description" => {
-                    metadata.abstract_text = val.as_str().map(String::from);
+                    metadata.abstract_text = val.as_str().map(|s| {
+                        vec![Block::Paragraph {
+                            content: vec![Inline::Text {
+                                value: s.to_string(),
+                            }],
+                        }]
+                    });
                 }
                 "keywords" | "tags" => {
                     metadata.keywords = parse_string_list(val);
@@ -317,6 +323,7 @@ impl MarkdownReader {
             NodeValue::Code(c) => {
                 out.push(Inline::Code {
                     value: c.literal.clone(),
+                    attrs: None,
                 });
             }
             NodeValue::Emph => {
@@ -341,18 +348,12 @@ impl MarkdownReader {
                         Some(link.title.clone())
                     },
                     content,
+                    attrs: None,
                 });
             }
             NodeValue::Image(img) => {
                 // Collect alt text from children
-                let alt_inlines = self.collect_inlines(node);
-                let alt = alt_inlines
-                    .iter()
-                    .map(|i| match i {
-                        Inline::Text { value } => value.as_str(),
-                        _ => "",
-                    })
-                    .collect::<String>();
+                let alt = self.collect_inlines(node);
                 out.push(Inline::Image(Image {
                     url: img.url.clone(),
                     alt,
@@ -361,6 +362,7 @@ impl MarkdownReader {
                     } else {
                         Some(img.title.clone())
                     },
+                    attrs: None,
                 }));
             }
             NodeValue::SoftBreak => {
@@ -449,6 +451,7 @@ impl MarkdownReader {
             columns,
             header,
             rows,
+            foot: None,
             attrs: None,
         }
     }
@@ -563,7 +566,7 @@ fn collect_plain_text(inlines: &[Inline], out: &mut String) {
     for inline in inlines {
         match inline {
             Inline::Text { value } => out.push_str(value),
-            Inline::Code { value } => out.push_str(value),
+            Inline::Code { value, .. } => out.push_str(value),
             Inline::MathInline { value } => out.push_str(value),
             Inline::Emphasis { content }
             | Inline::Strong { content }
@@ -993,10 +996,15 @@ mod tests {
         let input =
             "---\ntitle: Test\nabstract: This is the abstract.\nkeywords:\n  - rust\n  - wasm\n---\n\nBody.";
         let doc = reader.read(input).unwrap();
-        assert_eq!(
-            doc.metadata.abstract_text.as_deref(),
-            Some("This is the abstract.")
-        );
+        let abstract_text = doc.metadata.abstract_text.as_ref().and_then(|blocks| {
+            if let Some(Block::Paragraph { content }) = blocks.first() {
+                if let Some(Inline::Text { value }) = content.first() {
+                    return Some(value.as_str());
+                }
+            }
+            None
+        });
+        assert_eq!(abstract_text, Some("This is the abstract."));
         assert_eq!(doc.metadata.keywords, vec!["rust", "wasm"]);
     }
 

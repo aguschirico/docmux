@@ -225,7 +225,8 @@ fn resolve_inline(inline: &mut Inline, labels: &HashMap<String, ResolvedLabel>) 
         | Inline::SmallCaps { content }
         | Inline::Underline { content }
         | Inline::Span { content, .. }
-        | Inline::Link { content, .. } => {
+        | Inline::Link { content, .. }
+        | Inline::Quoted { content, .. } => {
             resolve_inlines(content, labels);
         }
         _ => {}
@@ -279,8 +280,9 @@ mod tests {
                 Block::Figure {
                     image: Image {
                         url: "a.png".into(),
-                        alt: "A".into(),
+                        alt: vec![Inline::text("A")],
                         title: None,
+                        attrs: None,
                     },
                     caption: Some(vec![Inline::text("First")]),
                     label: Some("fig:a".into()),
@@ -289,8 +291,9 @@ mod tests {
                 Block::Figure {
                     image: Image {
                         url: "b.png".into(),
-                        alt: "B".into(),
+                        alt: vec![Inline::text("B")],
                         title: None,
+                        attrs: None,
                     },
                     caption: Some(vec![Inline::text("Second")]),
                     label: Some("fig:b".into()),
@@ -350,6 +353,7 @@ mod tests {
                     columns: vec![],
                     header: None,
                     rows: vec![],
+                    foot: None,
                     attrs: None,
                 }),
                 Block::MathBlock {
@@ -431,8 +435,9 @@ mod tests {
                 Block::Figure {
                     image: Image {
                         url: "x.png".into(),
-                        alt: "X".into(),
+                        alt: vec![Inline::text("X")],
                         title: None,
+                        attrs: None,
                     },
                     caption: None,
                     label: Some("fig:x".into()),

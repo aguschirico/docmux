@@ -56,14 +56,14 @@
 
 ## Phase 3 — Production Features
 
-### Pandoc parity — AST
+### Pandoc parity — AST ✅
 
-- [ ] `Inline::Quoted` (smart quotes: SingleQuote, DoubleQuote)
-- [ ] `attrs` on inline `Code`, `Link`, `Image`
-- [ ] `Image.alt` as `Vec<Inline>` instead of `String`
-- [ ] Per-key prefix/suffix in `Citation` (match pandoc model)
-- [ ] `abstract_text` as `Vec<Block>` (formatted abstract)
-- [ ] Table footer (`foot: Option<Vec<TableCell>>`)
+- [x] `Inline::Quoted` (smart quotes: SingleQuote, DoubleQuote)
+- [x] `attrs` on inline `Code`, `Link`, `Image`
+- [x] `Image.alt` as `Vec<Inline>` instead of `String` (+ `alt_text()` helper)
+- [x] Per-key prefix/suffix in `Citation` (`CiteItem` struct, `keys()` helper)
+- [x] `abstract_text` as `Vec<Block>` (formatted abstract)
+- [x] Table footer (`foot: Option<Vec<TableCell>>`)
 
 ### Pandoc parity — CLI
 
@@ -94,7 +94,7 @@
 
 ### Writers & readers
 
-- [ ] Markdown writer — roundtrip, normalization
+- [x] `docmux-writer-markdown` — CommonMark/GFM roundtrip, normalization (28 tests)
 - [ ] Plain text writer — stripped output
 - [ ] HTML reader — web content, HTML→LaTeX
 - [ ] DOCX writer — OOXML output via zip + XML generation

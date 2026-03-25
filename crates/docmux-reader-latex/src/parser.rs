@@ -1,7 +1,7 @@
 use docmux_ast::{
-    Alignment, Author, Block, Citation, CitationMode, ColumnSpec, CrossRef, DefinitionItem,
-    Document, Image, Inline, ListItem, MetaValue, Metadata, ParseWarning, RefForm, Table,
-    TableCell,
+    Alignment, Author, Block, Citation, CitationMode, CiteItem, ColumnSpec, CrossRef,
+    DefinitionItem, Document, Image, Inline, ListItem, MetaValue, Metadata, ParseWarning, RefForm,
+    Table, TableCell,
 };
 
 use crate::lexer::Token;
@@ -64,7 +64,9 @@ impl Parser {
 
         // Merge abstract text into metadata if found.
         if let Some(abs) = self.abstract_text.take() {
-            metadata.abstract_text = Some(abs);
+            metadata.abstract_text = Some(vec![Block::Paragraph {
+                content: vec![Inline::Text { value: abs }],
+            }]);
         }
 
         // Append footnote definitions at the end of the content.
@@ -573,7 +575,7 @@ impl Parser {
             }
             "texttt" => {
                 let value = self.parse_brace_text();
-                Some(Inline::Code { value })
+                Some(Inline::Code { value, attrs: None })
             }
             "textsc" => {
                 let content = self.parse_inline_content();
@@ -594,6 +596,7 @@ impl Parser {
                     url,
                     title: None,
                     content,
+                    attrs: None,
                 })
             }
             "url" => {
@@ -602,6 +605,7 @@ impl Parser {
                     url: url.clone(),
                     title: None,
                     content: vec![Inline::Text { value: url }],
+                    attrs: None,
                 })
             }
             "cite" => {
@@ -612,9 +616,14 @@ impl Parser {
                     .filter(|s| !s.is_empty())
                     .collect();
                 Some(Inline::Citation(Citation {
-                    keys,
-                    prefix: None,
-                    suffix: None,
+                    items: keys
+                        .into_iter()
+                        .map(|k| CiteItem {
+                            key: k,
+                            prefix: None,
+                            suffix: None,
+                        })
+                        .collect(),
                     mode: CitationMode::Normal,
                 }))
             }
@@ -626,9 +635,14 @@ impl Parser {
                     .filter(|s| !s.is_empty())
                     .collect();
                 Some(Inline::Citation(Citation {
-                    keys,
-                    prefix: None,
-                    suffix: None,
+                    items: keys
+                        .into_iter()
+                        .map(|k| CiteItem {
+                            key: k,
+                            prefix: None,
+                            suffix: None,
+                        })
+                        .collect(),
                     mode: CitationMode::AuthorOnly,
                 }))
             }
@@ -640,9 +654,14 @@ impl Parser {
                     .filter(|s| !s.is_empty())
                     .collect();
                 Some(Inline::Citation(Citation {
-                    keys,
-                    prefix: None,
-                    suffix: None,
+                    items: keys
+                        .into_iter()
+                        .map(|k| CiteItem {
+                            key: k,
+                            prefix: None,
+                            suffix: None,
+                        })
+                        .collect(),
                     mode: CitationMode::SuppressAuthor,
                 }))
             }
@@ -1211,8 +1230,9 @@ impl Parser {
         Block::Figure {
             image: Image {
                 url: image_url.unwrap_or_default(),
-                alt: String::new(),
+                alt: vec![],
                 title: None,
+                attrs: None,
             },
             caption,
             label,
@@ -1280,6 +1300,7 @@ impl Parser {
             columns: Vec::new(),
             header: None,
             rows: Vec::new(),
+            foot: None,
             attrs: None,
         });
 
@@ -1410,6 +1431,7 @@ impl Parser {
             columns,
             header,
             rows,
+            foot: None,
             attrs: None,
         }
     }
@@ -1859,10 +1881,18 @@ Body text.
 \end{document}";
         let tokens = tokenize(input);
         let doc = Parser::new(tokens).parse();
-        assert_eq!(
-            doc.metadata.abstract_text.as_deref(),
-            Some("This is the abstract.")
-        );
+        assert!(doc.metadata.abstract_text.is_some());
+        if let Some(blocks) = &doc.metadata.abstract_text {
+            if let Block::Paragraph { content } = &blocks[0] {
+                if let Inline::Text { value } = &content[0] {
+                    assert_eq!(value.as_str(), "This is the abstract.");
+                } else {
+                    panic!("Expected Text inline");
+                }
+            } else {
+                panic!("Expected Paragraph block");
+            }
+        }
     }
 
     #[test]

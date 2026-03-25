@@ -42,7 +42,8 @@ pub struct Metadata {
     pub title: Option<String>,
     pub authors: Vec<Author>,
     pub date: Option<String>,
-    pub abstract_text: Option<String>,
+    /// Formatted abstract (as block content, not plain text).
+    pub abstract_text: Option<Vec<Block>>,
     pub keywords: Vec<String>,
     /// Arbitrary key-value pairs not captured by the typed fields above.
     #[serde(default)]
@@ -202,7 +203,7 @@ pub enum ListDelim {
 
 // ─── Table ───────────────────────────────────────────────────────────────────
 
-/// A table with optional caption, column specs, header row, and body rows.
+/// A table with optional caption, column specs, header row, body rows, and footer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Table {
     pub caption: Option<Vec<Inline>>,
@@ -210,6 +211,9 @@ pub struct Table {
     pub columns: Vec<ColumnSpec>,
     pub header: Option<Vec<TableCell>>,
     pub rows: Vec<Vec<TableCell>>,
+    /// Optional footer row (e.g. totals, summaries).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foot: Option<Vec<TableCell>>,
     /// Extra attributes (id, classes, key-value pairs) from source format.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attrs: Option<Attributes>,
@@ -288,7 +292,12 @@ pub enum Inline {
     Strikethrough { content: Vec<Inline> },
 
     /// Inline code.
-    Code { value: String },
+    Code {
+        value: String,
+        /// Extra attributes (classes, key-value pairs) from source format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attrs: Option<Attributes>,
+    },
 
     /// Inline math (e.g. `$x^2$`).
     MathInline { value: String },
@@ -298,6 +307,9 @@ pub enum Inline {
         url: String,
         title: Option<String>,
         content: Vec<Inline>,
+        /// Extra attributes (classes, key-value pairs) from source format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attrs: Option<Attributes>,
     },
 
     /// An inline image.
@@ -338,6 +350,19 @@ pub enum Inline {
         content: Vec<Inline>,
         attrs: Attributes,
     },
+
+    /// Quoted content (smart quotes).
+    Quoted {
+        quote_type: QuoteType,
+        content: Vec<Inline>,
+    },
+}
+
+/// Type of smart quotation marks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuoteType {
+    SingleQuote,
+    DoubleQuote,
 }
 
 // ─── Image ───────────────────────────────────────────────────────────────────
@@ -346,8 +371,42 @@ pub enum Inline {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Image {
     pub url: String,
-    pub alt: String,
+    /// Alt text as rich inline content (matches pandoc model).
+    pub alt: Vec<Inline>,
     pub title: Option<String>,
+    /// Extra attributes (classes, key-value pairs) from source format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attrs: Option<Attributes>,
+}
+
+impl Image {
+    /// Convenience: extract alt text as a plain string (concatenating text nodes).
+    pub fn alt_text(&self) -> String {
+        fn collect_text(inlines: &[Inline], out: &mut String) {
+            for inline in inlines {
+                match inline {
+                    Inline::Text { value } => out.push_str(value),
+                    Inline::Emphasis { content }
+                    | Inline::Strong { content }
+                    | Inline::Strikethrough { content }
+                    | Inline::Underline { content }
+                    | Inline::Superscript { content }
+                    | Inline::Subscript { content }
+                    | Inline::SmallCaps { content }
+                    | Inline::Span { content, .. }
+                    | Inline::Quoted { content, .. } => collect_text(content, out),
+                    Inline::Code { value, .. } => out.push_str(value),
+                    Inline::MathInline { value } => out.push_str(value),
+                    Inline::SoftBreak => out.push(' '),
+                    Inline::HardBreak => out.push('\n'),
+                    _ => {}
+                }
+            }
+        }
+        let mut s = String::new();
+        collect_text(&self.alt, &mut s);
+        s
+    }
 }
 
 // ─── Citation ────────────────────────────────────────────────────────────────
@@ -355,13 +414,27 @@ pub struct Image {
 /// A citation referencing one or more bibliography entries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Citation {
-    /// BibTeX keys (e.g. `["smith2020", "jones2021"]`).
-    pub keys: Vec<String>,
-    /// Text before the citation (e.g. "see").
-    pub prefix: Option<String>,
-    /// Text after the citation (e.g. "p. 42").
-    pub suffix: Option<String>,
+    /// Individual citation items, each with its own key and optional prefix/suffix.
+    pub items: Vec<CiteItem>,
     pub mode: CitationMode,
+}
+
+/// A single item within a citation group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CiteItem {
+    /// BibTeX key (e.g. `"smith2020"`).
+    pub key: String,
+    /// Text before this citation item (e.g. "see").
+    pub prefix: Option<String>,
+    /// Text after this citation item (e.g. "p. 42").
+    pub suffix: Option<String>,
+}
+
+impl Citation {
+    /// Convenience: collect all keys from citation items.
+    pub fn keys(&self) -> Vec<&str> {
+        self.items.iter().map(|item| item.key.as_str()).collect()
+    }
 }
 
 /// How the citation should be rendered.
@@ -477,6 +550,14 @@ impl Inline {
     pub fn text(s: impl Into<String>) -> Self {
         Inline::Text { value: s.into() }
     }
+
+    /// Shorthand for inline code.
+    pub fn code(s: impl Into<String>) -> Self {
+        Inline::Code {
+            value: s.into(),
+            attrs: None,
+        }
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -519,12 +600,15 @@ mod tests {
     #[test]
     fn citation_default_mode() {
         let cite = Citation {
-            keys: vec!["smith2020".into()],
-            prefix: None,
-            suffix: None,
+            items: vec![CiteItem {
+                key: "smith2020".into(),
+                prefix: None,
+                suffix: None,
+            }],
             mode: CitationMode::default(),
         };
         assert!(matches!(cite.mode, CitationMode::Normal));
+        assert_eq!(cite.keys(), vec!["smith2020"]);
     }
 
     #[test]
@@ -566,6 +650,7 @@ mod tests {
                     rowspan: 1,
                 },
             ]],
+            foot: None,
             attrs: None,
         };
         assert_eq!(table.rows.len(), 1);

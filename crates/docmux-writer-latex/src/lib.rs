@@ -250,6 +250,10 @@ impl LatexWriter {
             self.write_table_row(row, opts, out, false);
         }
 
+        if let Some(foot) = &table.foot {
+            self.write_table_row(foot, opts, out, false);
+        }
+
         out.push_str("\\hline\n");
         out.push_str("\\end{tabular}\n");
         out.push_str("\\end{table}\n");
@@ -304,7 +308,7 @@ impl LatexWriter {
                 self.write_inlines(content, opts, out);
                 out.push('}');
             }
-            Inline::Code { value } => {
+            Inline::Code { value, .. } => {
                 // Use \texttt with escaped content (not \verb since it
                 // can't be nested inside other commands)
                 out.push_str("\\texttt{");
@@ -325,6 +329,7 @@ impl LatexWriter {
                 url,
                 title: _,
                 content,
+                ..
             } => {
                 // Check if the link text matches the URL (autolink)
                 let mut link_text = String::new();
@@ -342,24 +347,39 @@ impl LatexWriter {
                 out.push_str(&format!("\\includegraphics{{{}}}", escape_latex(&img.url)));
             }
             Inline::Citation(cite) => {
-                if let Some(prefix) = &cite.prefix {
+                if let Some(prefix) = cite.items.first().and_then(|i| i.prefix.as_deref()) {
                     out.push_str(&format!("{}~", escape_latex(prefix)));
                 }
                 match cite.mode {
                     CitationMode::Normal => {
-                        out.push_str(&format!("\\cite{{{}}}", cite.keys.join(",")));
+                        out.push_str(&format!("\\cite{{{}}}", cite.keys().join(",")));
                     }
                     CitationMode::AuthorOnly => {
-                        out.push_str(&format!("\\citet{{{}}}", cite.keys.join(",")));
+                        out.push_str(&format!("\\citet{{{}}}", cite.keys().join(",")));
                     }
                     CitationMode::SuppressAuthor => {
-                        out.push_str(&format!("\\citeyear{{{}}}", cite.keys.join(",")));
+                        out.push_str(&format!("\\citeyear{{{}}}", cite.keys().join(",")));
                     }
                 }
-                if let Some(suffix) = &cite.suffix {
+                if let Some(suffix) = cite.items.last().and_then(|i| i.suffix.as_deref()) {
                     out.push_str(&format!(" {}", escape_latex(suffix)));
                 }
             }
+            Inline::Quoted {
+                quote_type,
+                content,
+            } => match quote_type {
+                QuoteType::SingleQuote => {
+                    out.push('`');
+                    self.write_inlines(content, opts, out);
+                    out.push('\'');
+                }
+                QuoteType::DoubleQuote => {
+                    out.push_str("``");
+                    self.write_inlines(content, opts, out);
+                    out.push_str("''");
+                }
+            },
             Inline::FootnoteRef { id } => {
                 out.push_str(&format!("\\footnotemark[{}]", escape_latex(id)));
             }
@@ -419,7 +439,7 @@ impl LatexWriter {
         }
     }
 
-    fn wrap_standalone(&self, body: &str, doc: &Document) -> String {
+    fn wrap_standalone(&self, body: &str, doc: &Document, opts: &WriteOptions) -> String {
         let mut preamble = String::with_capacity(1024);
 
         preamble.push_str("\\documentclass{article}\n");
@@ -461,10 +481,9 @@ impl LatexWriter {
             preamble.push_str("\\maketitle\n");
         }
 
-        if let Some(abstract_text) = &doc.metadata.abstract_text {
+        if let Some(blocks) = &doc.metadata.abstract_text {
             preamble.push_str("\\begin{abstract}\n");
-            preamble.push_str(&escape_latex(abstract_text));
-            preamble.push('\n');
+            self.write_blocks(blocks, opts, &mut preamble);
             preamble.push_str("\\end{abstract}\n");
         }
 
@@ -490,7 +509,7 @@ impl Writer for LatexWriter {
         self.write_blocks(&doc.content, opts, &mut body);
 
         if opts.standalone {
-            Ok(self.wrap_standalone(&body, doc))
+            Ok(self.wrap_standalone(&body, doc, opts))
         } else {
             Ok(body)
         }
@@ -660,7 +679,7 @@ mod tests {
                     orcid: None,
                 }],
                 date: Some("2026".into()),
-                abstract_text: Some("This paper is about things.".into()),
+                abstract_text: Some(vec![Block::text("This paper is about things.")]),
                 ..Default::default()
             },
             content: vec![Block::text("Body text.")],

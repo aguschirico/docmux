@@ -18,6 +18,7 @@ docmux-reader-latex = { workspace = true }
 docmux-reader-markdown = { workspace = true }
 docmux-reader-typst = { workspace = true }
 docmux-writer-html = { workspace = true }
+docmux-writer-markdown = { workspace = true }
 docmux-writer-latex = { workspace = true }
 docmux-writer-typst = { workspace = true }
 clap = { workspace = true }

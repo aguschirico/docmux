@@ -263,7 +263,7 @@ impl TypstWriter {
                 self.write_inlines_impl(content, opts, out, footnotes);
                 out.push(']');
             }
-            Inline::Code { value } => {
+            Inline::Code { value, .. } => {
                 out.push('`');
                 out.push_str(value);
                 out.push('`');
@@ -283,8 +283,9 @@ impl TypstWriter {
             }
             Inline::Image(img) => {
                 out.push_str(&format!("#image(\"{}\"", escape_typst_url(&img.url)));
-                if !img.alt.is_empty() {
-                    out.push_str(&format!(", alt: \"{}\"", escape_typst_url(&img.alt)));
+                let alt_text = img.alt_text();
+                if !alt_text.is_empty() {
+                    out.push_str(&format!(", alt: \"{}\"", escape_typst_url(&alt_text)));
                 }
                 out.push(')');
             }
@@ -317,20 +318,20 @@ impl TypstWriter {
                 }
             }
             Inline::Citation(cite) => {
-                if let Some(prefix) = &cite.prefix {
+                if let Some(prefix) = cite.items.first().and_then(|i| i.prefix.as_deref()) {
                     out.push_str(&escape_typst(prefix));
                     out.push(' ');
                 }
-                for (i, key) in cite.keys.iter().enumerate() {
+                for (i, item) in cite.items.iter().enumerate() {
                     if i > 0 {
                         out.push(' ');
                     }
                     out.push('@');
-                    out.push_str(key);
-                }
-                if let Some(suffix) = &cite.suffix {
-                    out.push(' ');
-                    out.push_str(&escape_typst(suffix));
+                    out.push_str(&item.key);
+                    if let Some(suffix) = &item.suffix {
+                        out.push(' ');
+                        out.push_str(&escape_typst(suffix));
+                    }
                 }
             }
             Inline::CrossRef(cr) => {
@@ -345,6 +346,18 @@ impl TypstWriter {
                     out.push_str(inner.trim());
                     out.push(']');
                 }
+            }
+            Inline::Quoted {
+                quote_type,
+                content,
+            } => {
+                let (open, close) = match quote_type {
+                    QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
+                    QuoteType::DoubleQuote => ('\u{201C}', '\u{201D}'),
+                };
+                out.push(open);
+                self.write_inlines_impl(content, opts, out, footnotes);
+                out.push(close);
             }
         }
     }
@@ -418,6 +431,18 @@ impl TypstWriter {
             }
         }
 
+        if let Some(foot) = &table.foot {
+            out.push_str("  table.footer(\n");
+            for cell in foot {
+                out.push_str("    [");
+                let mut cell_content = String::new();
+                self.write_blocks_impl(&cell.content, opts, &mut cell_content, footnotes);
+                out.push_str(cell_content.trim());
+                out.push_str("],\n");
+            }
+            out.push_str("  ),\n");
+        }
+
         out.push(')');
         if has_wrapper {
             out.push(')');
@@ -471,10 +496,16 @@ impl TypstWriter {
             preamble.push_str(")\n\n");
         }
 
-        if let Some(abstract_text) = &doc.metadata.abstract_text {
+        if let Some(abstract_blocks) = &doc.metadata.abstract_text {
             preamble.push_str("#quote(block: true)[\n");
-            preamble.push_str(&escape_typst(abstract_text));
-            preamble.push_str("\n]\n\n");
+            let opts_default = WriteOptions::default();
+            self.write_blocks_impl(
+                abstract_blocks,
+                &opts_default,
+                &mut preamble,
+                &HashMap::new(),
+            );
+            preamble.push_str("]\n\n");
         }
 
         preamble.push_str(body);
@@ -663,6 +694,7 @@ mod tests {
                 content: vec![
                     Inline::Code {
                         value: "x + 1".into(),
+                        attrs: None,
                     },
                     Inline::text(" and "),
                     Inline::MathInline {
@@ -686,12 +718,14 @@ mod tests {
                         url: "https://example.com".into(),
                         title: None,
                         content: vec![Inline::text("Example")],
+                        attrs: None,
                     },
                     Inline::text(" "),
                     Inline::Image(Image {
                         url: "photo.png".into(),
-                        alt: "A photo".into(),
+                        alt: vec![Inline::text("A photo")],
                         title: None,
+                        attrs: None,
                     }),
                 ],
             }],
@@ -829,6 +863,7 @@ mod tests {
                         rowspan: 1,
                     },
                 ]],
+                foot: None,
                 attrs: None,
             })],
             ..Default::default()
@@ -847,8 +882,9 @@ mod tests {
             content: vec![Block::Figure {
                 image: Image {
                     url: "diagram.png".into(),
-                    alt: "Architecture".into(),
+                    alt: vec![Inline::text("Architecture")],
                     title: None,
+                    attrs: None,
                 },
                 caption: Some(vec![Inline::text("System architecture")]),
                 label: Some("fig:arch".into()),
@@ -875,7 +911,7 @@ mod tests {
                     orcid: None,
                 }],
                 date: Some("2026-03-25".into()),
-                abstract_text: Some("This paper is about things.".into()),
+                abstract_text: Some(vec![Block::text("This paper is about things.")]),
                 ..Default::default()
             },
             content: vec![Block::text("Body text.")],

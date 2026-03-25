@@ -10,6 +10,7 @@ use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_typst::TypstReader;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
+use docmux_writer_markdown::MarkdownWriter;
 use docmux_writer_typst::TypstWriter;
 use std::collections::HashMap;
 use std::io::Read;
@@ -87,6 +88,7 @@ fn build_registry() -> Registry {
     reg.add_reader(Box::new(TypstReader::new()));
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
+    reg.add_writer(Box::new(MarkdownWriter::new()));
     reg.add_writer(Box::new(TypstWriter::new()));
     reg
 }
@@ -298,7 +300,9 @@ fn apply_metadata_overrides(metadata: &mut Metadata, overrides: &[String]) {
         match key {
             "title" => metadata.title = Some(val.to_string()),
             "date" => metadata.date = Some(val.to_string()),
-            "abstract" | "abstract_text" => metadata.abstract_text = Some(val.to_string()),
+            "abstract" | "abstract_text" => {
+                metadata.abstract_text = Some(vec![docmux_ast::Block::text(val)]);
+            }
             _ => {
                 metadata.custom.insert(
                     key.to_string(),

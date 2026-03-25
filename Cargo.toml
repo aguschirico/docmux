@@ -10,6 +10,7 @@ members = [
     "crates/docmux-writer-html",
     "crates/docmux-writer-latex",
     "crates/docmux-writer-typst",
+    "crates/docmux-writer-markdown",
     "crates/docmux-writer-docx",
     "crates/docmux-transform-math",
     "crates/docmux-transform-cite",
@@ -37,6 +38,7 @@ docmux-reader-latex = { path = "crates/docmux-reader-latex" }
 docmux-writer-html = { path = "crates/docmux-writer-html" }
 docmux-writer-latex = { path = "crates/docmux-writer-latex" }
 docmux-writer-typst = { path = "crates/docmux-writer-typst" }
+docmux-writer-markdown = { path = "crates/docmux-writer-markdown" }
 docmux-writer-docx = { path = "crates/docmux-writer-docx" }
 docmux-transform-math = { path = "crates/docmux-transform-math" }
 docmux-transform-cite = { path = "crates/docmux-transform-cite" }
