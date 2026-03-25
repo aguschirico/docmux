@@ -39,7 +39,7 @@ See `ROADMAP.md` for full status. Implemented:
 - `docmux-transform-crossref` (7 tests)
 - 13 golden file fixtures × 2 formats = 26 golden files
 
-Next up: Phase 2 — LaTeX reader, npm package, cite transform, math transform.
+Phase 2 in progress. Completed: LaTeX reader, Typst reader (81 tests). Next: npm package, cite transform, math transform.
 
 ## Coding conventions
 

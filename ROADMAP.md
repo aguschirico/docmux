@@ -21,7 +21,7 @@
 
 ## Phase 2 — Format Coverage
 
-- [ ] `docmux-reader-typst` — Typst markup parser
+- [x] `docmux-reader-typst` — Typst markup parser (81 tests)
 - [ ] `docmux-writer-typst` — Typst output
 - [ ] `docmux-reader-myst` — MyST Markdown (directives, roles, cross-refs)
 - [ ] `docmux-writer-docx` — OOXML output via zip + XML generation
