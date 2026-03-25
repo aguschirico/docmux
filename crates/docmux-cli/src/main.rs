@@ -4,11 +4,13 @@
 
 use clap::Parser;
 use docmux_ast::{Block, Metadata};
-use docmux_core::{MathEngine, Registry, WriteOptions};
+use docmux_core::{Eol, MathEngine, Registry, Transform, TransformContext, WrapMode, WriteOptions};
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
+use docmux_transform_number_sections::NumberSectionsTransform;
+use docmux_transform_toc::TocTransform;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
@@ -65,6 +67,34 @@ struct Cli {
     /// Shift heading levels by N (positive = demote, negative = promote)
     #[arg(long, value_name = "N", allow_hyphen_values = true)]
     shift_heading_level_by: Option<i8>,
+
+    /// Include a table of contents in the output
+    #[arg(long)]
+    toc: bool,
+
+    /// Maximum heading depth for the table of contents (1–6, default 3)
+    #[arg(long, value_name = "N", default_value = "3")]
+    toc_depth: u8,
+
+    /// Number section headings (1, 1.1, 1.1.1, …)
+    #[arg(short = 'N', long)]
+    number_sections: bool,
+
+    /// How to interpret top-level headings when numbering (section, chapter, part)
+    #[arg(long, value_name = "TYPE", value_parser = ["section", "chapter", "part"], default_value = "section")]
+    top_level_division: String,
+
+    /// Text wrapping: auto (at --columns width), none (no wrapping), preserve (keep source breaks)
+    #[arg(long, value_name = "MODE", value_parser = ["auto", "none", "preserve"], default_value = "none")]
+    wrap: String,
+
+    /// Column width for --wrap=auto (default 72)
+    #[arg(long, value_name = "N", default_value = "72")]
+    columns: usize,
+
+    /// Line ending style: lf, crlf, native
+    #[arg(long, value_name = "STYLE", value_parser = ["lf", "crlf", "native"], default_value = "lf")]
+    eol: String,
 
     /// List supported input formats and exit
     #[arg(long)]
@@ -190,6 +220,30 @@ fn main() {
         shift_headings(&mut doc.content, shift);
     }
 
+    // Apply --number-sections (before --toc so the ToC sees numbered headings)
+    if cli.number_sections {
+        let mut ctx = TransformContext::default();
+        ctx.variables.insert(
+            "top-level-division".to_string(),
+            cli.top_level_division.clone(),
+        );
+        if let Err(e) = NumberSectionsTransform::new().transform(&mut doc, &ctx) {
+            eprintln!("docmux: number-sections error: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    // Apply --toc
+    if cli.toc {
+        let mut ctx = TransformContext::default();
+        ctx.variables
+            .insert("toc-depth".to_string(), cli.toc_depth.to_string());
+        if let Err(e) = TocTransform::new().transform(&mut doc, &ctx) {
+            eprintln!("docmux: toc error: {e}");
+            std::process::exit(1);
+        }
+    }
+
     // Show warnings in verbose mode
     if cli.verbose && !doc.warnings.is_empty() {
         for w in &doc.warnings {
@@ -249,10 +303,25 @@ fn main() {
         }))
         .collect();
 
+    let wrap = match cli.wrap.as_str() {
+        "auto" => WrapMode::Auto,
+        "preserve" => WrapMode::Preserve,
+        _ => WrapMode::None,
+    };
+
+    let eol = match cli.eol.as_str() {
+        "crlf" => Eol::Crlf,
+        "native" => Eol::Native,
+        _ => Eol::Lf,
+    };
+
     let opts = WriteOptions {
         standalone: cli.standalone,
         math_engine,
         variables,
+        wrap,
+        columns: cli.columns,
+        eol,
         ..Default::default()
     };
 
@@ -264,6 +333,7 @@ fn main() {
         }
     };
 
+    let output = postprocess(&output, wrap, cli.columns, eol);
     write_output(&cli, &output);
 }
 
@@ -293,6 +363,136 @@ fn write_output(cli: &Cli, output: &str) {
             print!("{output}");
         }
     }
+}
+
+/// Apply `--wrap`, `--columns`, and `--eol` post-processing to writer output.
+fn postprocess(text: &str, wrap: WrapMode, columns: usize, eol: Eol) -> String {
+    let wrapped = match wrap {
+        WrapMode::Auto => wrap_text(text, columns),
+        WrapMode::None | WrapMode::Preserve => text.to_string(),
+    };
+
+    match eol {
+        Eol::Lf => wrapped,
+        Eol::Crlf => wrapped.replace('\n', "\r\n"),
+        Eol::Native => {
+            if cfg!(windows) {
+                wrapped.replace('\n', "\r\n")
+            } else {
+                wrapped
+            }
+        }
+    }
+}
+
+/// Word-wrap paragraphs at `columns` width.
+///
+/// Blank-line-separated blocks are wrapped independently. Lines that look
+/// like code, headings, list markers, tables, or HTML tags are left
+/// untouched. Fenced code blocks (``` or ~~~) are passed through verbatim.
+fn wrap_text(text: &str, columns: usize) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut para = String::new();
+    let mut in_fence = false;
+
+    for line in text.lines() {
+        // Track fenced code blocks
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            // Flush any pending paragraph
+            if !para.is_empty() {
+                wrap_paragraph(&para, columns, &mut out);
+                para.clear();
+            }
+            in_fence = !in_fence;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        if line.trim().is_empty() {
+            // Flush accumulated paragraph
+            if !para.is_empty() {
+                wrap_paragraph(&para, columns, &mut out);
+                para.clear();
+            }
+            out.push('\n');
+        } else if is_verbatim_line(line) {
+            // Flush any pending paragraph first
+            if !para.is_empty() {
+                wrap_paragraph(&para, columns, &mut out);
+                para.clear();
+            }
+            out.push_str(line);
+            out.push('\n');
+        } else {
+            // Accumulate paragraph words
+            if !para.is_empty() {
+                para.push(' ');
+            }
+            para.push_str(line.trim());
+        }
+    }
+
+    // Flush final paragraph
+    if !para.is_empty() {
+        wrap_paragraph(&para, columns, &mut out);
+    }
+
+    // Preserve whether original ended with newline
+    if text.ends_with('\n') && !out.ends_with('\n') {
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Returns true for lines that should not be reflowed.
+fn is_verbatim_line(line: &str) -> bool {
+    // Indented code (4+ spaces or tab)
+    if line.starts_with("    ") || line.starts_with('\t') {
+        return true;
+    }
+    let trimmed = line.trim_start();
+    // Headings, blockquotes, HTML tags, list markers, table pipes, div fences
+    trimmed.starts_with('#')
+        || trimmed.starts_with('>')
+        || trimmed.starts_with('|')
+        || trimmed.starts_with("- ")
+        || trimmed.starts_with("* ")
+        || trimmed.starts_with("+ ")
+        || trimmed.starts_with('<')
+        || trimmed.starts_with(":::")
+        || trimmed
+            .bytes()
+            .take_while(|b| b.is_ascii_digit())
+            .count()
+            > 0
+            && trimmed.chars().find(|c| !c.is_ascii_digit()) == Some('.')
+}
+
+/// Wrap a single paragraph's text at `columns` and append to `out`.
+fn wrap_paragraph(para: &str, columns: usize, out: &mut String) {
+    let mut col = 0;
+    for (i, word) in para.split_whitespace().enumerate() {
+        let wlen = word.len();
+        if i > 0 && col + 1 + wlen > columns {
+            out.push('\n');
+            col = 0;
+        } else if i > 0 {
+            out.push(' ');
+            col += 1;
+        }
+        out.push_str(word);
+        col += wlen;
+    }
+    out.push('\n');
 }
 
 /// Apply `-M KEY=VAL` overrides to document metadata.

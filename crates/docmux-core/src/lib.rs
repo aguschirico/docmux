@@ -107,6 +107,12 @@ pub struct WriteOptions {
     pub template: Option<String>,
     /// Arbitrary key-value variables passed to templates.
     pub variables: HashMap<String, String>,
+    /// How to handle line wrapping in the output.
+    pub wrap: WrapMode,
+    /// Target column width for `WrapMode::Auto`.
+    pub columns: usize,
+    /// Line ending style for the output.
+    pub eol: Eol,
 }
 
 impl Default for WriteOptions {
@@ -117,8 +123,35 @@ impl Default for WriteOptions {
             standalone: false,
             template: None,
             variables: HashMap::new(),
+            wrap: WrapMode::default(),
+            columns: 72,
+            eol: Eol::default(),
         }
     }
+}
+
+/// Line-wrapping behaviour for writers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WrapMode {
+    /// Wrap at [`WriteOptions::columns`] width.
+    Auto,
+    /// Do not add any line breaks (each paragraph on one line).
+    #[default]
+    None,
+    /// Preserve existing line breaks from the source.
+    Preserve,
+}
+
+/// Line-ending style.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Eol {
+    /// Unix-style `\n`.
+    #[default]
+    Lf,
+    /// Windows-style `\r\n`.
+    Crlf,
+    /// Use the platform default.
+    Native,
 }
 
 /// Target math rendering engine.

@@ -67,15 +67,15 @@
 
 ### Pandoc parity — CLI
 
-- [ ] `--toc` and `--toc-depth=N`
-- [ ] `-N` / `--number-sections`
+- [x] `--toc` and `--toc-depth=N`
+- [x] `-N` / `--number-sections`
+- [x] `--top-level-division=section|chapter|part`
+- [x] `--wrap=auto|none|preserve`, `--columns=N`
+- [x] `--eol=crlf|lf|native`
 - [ ] `--template=FILE` with template engine
 - [ ] `--bibliography=FILE`, `--csl=FILE`
 - [ ] `--highlight-style=STYLE`
-- [ ] `--wrap=auto|none|preserve`, `--columns=N`
 - [ ] `--section-divs`, `--id-prefix=PREFIX`
-- [ ] `--eol=crlf|lf|native`
-- [ ] `--top-level-division=section|chapter|part`
 
 ### Pandoc parity — Extensions (markdown reader)
 
