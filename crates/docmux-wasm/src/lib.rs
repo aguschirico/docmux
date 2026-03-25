@@ -50,12 +50,7 @@ pub fn convert_standalone(input: &str, from: &str, to: &str) -> Result<String, J
     convert_inner(input, from, to, true)
 }
 
-fn convert_inner(
-    input: &str,
-    from: &str,
-    to: &str,
-    standalone: bool,
-) -> Result<String, JsError> {
+fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<String, JsError> {
     let reg = build_registry();
 
     let reader = reg

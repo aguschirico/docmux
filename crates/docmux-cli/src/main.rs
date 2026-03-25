@@ -469,11 +469,7 @@ fn is_verbatim_line(line: &str) -> bool {
         || trimmed.starts_with("+ ")
         || trimmed.starts_with('<')
         || trimmed.starts_with(":::")
-        || trimmed
-            .bytes()
-            .take_while(|b| b.is_ascii_digit())
-            .count()
-            > 0
+        || trimmed.bytes().take_while(|b| b.is_ascii_digit()).count() > 0
             && trimmed.chars().find(|c| !c.is_ascii_digit()) == Some('.')
 }
 
