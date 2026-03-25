@@ -223,6 +223,30 @@ fn typst_format_autodetected() {
     );
 }
 
+#[test]
+fn converts_typst_to_typst_stdout() {
+    let tmp = std::env::temp_dir().join("docmux-test");
+    std::fs::create_dir_all(&tmp).ok();
+    let input_file = tmp.join("roundtrip.typ");
+    std::fs::write(&input_file, "= Hello\n\n*Bold* and _italic_.").unwrap();
+
+    let output = Command::new(docmux_bin())
+        .arg(&input_file)
+        .arg("--to")
+        .arg("typst")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(
+        output.status.success(),
+        "docmux exited with error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("= Hello"), "Expected Typst heading in output");
+    assert!(stdout.contains("*Bold*"), "Expected bold markup");
+}
+
 // ─── Error cases ────────────────────────────────────────────────────────────
 
 #[test]

@@ -25,6 +25,7 @@ use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_typst::TypstReader;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
+use docmux_writer_typst::TypstWriter;
 use std::path::{Path, PathBuf};
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -398,7 +399,9 @@ fn discover_typ_fixtures(dir: &Path) -> Vec<PathBuf> {
             results.extend(discover_typ_fixtures(&path));
         } else if path.extension().is_some_and(|ext| ext == "typ") {
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-            if stem.starts_with("typst-") {
+            // Only match primary fixture files: stem must start with "typst-"
+            // and must not contain a dot (ruling out derived files like typst-foo.typ.typ).
+            if stem.starts_with("typst-") && !stem.contains('.') {
                 results.push(path);
             }
         }
@@ -533,6 +536,84 @@ fn golden_typ_to_latex() {
     if !failures.is_empty() {
         panic!(
             "\n\n{count} .typ→.tex golden file(s) mismatched:\n\n{details}",
+            count = failures.len(),
+            details = failures.join("\n"),
+        );
+    }
+}
+
+fn convert_typ_to_typst(input: &str) -> String {
+    let reader = TypstReader::new();
+    let writer = TypstWriter::new();
+    let opts = WriteOptions::default();
+    let doc = reader
+        .read(input)
+        .expect("typst reader should not fail on fixture");
+    writer
+        .write(&doc, &opts)
+        .expect("typst writer should not fail")
+}
+
+#[test]
+fn golden_typ_to_typst() {
+    let base = fixtures_dir();
+    let fixtures = discover_typ_fixtures(&base);
+
+    if fixtures.is_empty() {
+        eprintln!("No .typ fixtures found (skipping golden_typ_to_typst)");
+        return;
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut generated = 0u32;
+    let mut updated = 0u32;
+
+    for fixture_path in &fixtures {
+        let name = test_name(fixture_path, &base);
+        let expected_path = fixture_path.with_extension("typ.typ");
+
+        let input = std::fs::read_to_string(fixture_path)
+            .unwrap_or_else(|e| panic!("[{name}] failed to read input: {e}"));
+        let actual = convert_typ_to_typst(&input);
+
+        if update_mode() {
+            std::fs::write(&expected_path, &actual)
+                .unwrap_or_else(|e| panic!("[{name}] failed to write expected: {e}"));
+            updated += 1;
+            eprintln!("  updated: {name}.typ.typ");
+            continue;
+        }
+
+        if !expected_path.exists() {
+            std::fs::write(&expected_path, &actual)
+                .unwrap_or_else(|e| panic!("[{name}] failed to write expected: {e}"));
+            generated += 1;
+            eprintln!("  generated: {name}.typ.typ (new — review the file)");
+            continue;
+        }
+
+        let expected = std::fs::read_to_string(&expected_path)
+            .unwrap_or_else(|e| panic!("[{name}] failed to read expected: {e}"));
+
+        if actual != expected {
+            failures.push(format!(
+                "━━━ MISMATCH: {name}.typ.typ ━━━\n--- expected ({path})\n+++ actual\n\n{diff}\nHint: run `DOCMUX_UPDATE_EXPECTATIONS=1 cargo test -p docmux-cli --test golden` to update.\n",
+                path = expected_path.display(),
+                diff = line_diff(&expected, &actual),
+            ));
+        }
+    }
+
+    if generated > 0 {
+        eprintln!("\n  {} new .typ.typ expectation(s) generated.", generated);
+    }
+    if updated > 0 {
+        eprintln!("\n  {} .typ.typ expectation(s) updated.", updated);
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "\n\n{count} .typ→.typ golden file(s) mismatched:\n\n{details}",
             count = failures.len(),
             details = failures.join("\n"),
         );
