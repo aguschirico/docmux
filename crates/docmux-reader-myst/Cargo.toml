@@ -10,3 +10,4 @@ rust-version.workspace = true
 [dependencies]
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
+docmux-reader-markdown = { workspace = true }
