@@ -13,7 +13,27 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
+
+# Readers
 docmux-reader-markdown = { workspace = true }
+docmux-reader-latex = { workspace = true }
+docmux-reader-typst = { workspace = true }
+docmux-reader-myst = { workspace = true }
+
+# Writers
 docmux-writer-html = { workspace = true }
 docmux-writer-latex = { workspace = true }
+docmux-writer-typst = { workspace = true }
+docmux-writer-markdown = { workspace = true }
+docmux-writer-plaintext = { workspace = true }
+
+# Transforms
+docmux-transform-crossref = { workspace = true }
+docmux-transform-toc = { workspace = true }
+docmux-transform-number-sections = { workspace = true }
+
 wasm-bindgen = "0.2"
+serde_json = "1"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

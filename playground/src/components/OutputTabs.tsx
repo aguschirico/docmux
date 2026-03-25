@@ -1,18 +1,58 @@
+import { useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { useConversion } from "@/hooks/useConversion";
+import { db } from "@/vfs/db";
+import { getFormat } from "@/lib/formats";
+import { HtmlPreview } from "@/components/output-tabs/HtmlPreview";
+import { ReadOnlyEditor } from "@/components/output-tabs/ReadOnlyEditor";
+import { DiagnosticsView } from "@/components/output-tabs/DiagnosticsView";
 
-function Placeholder({ label }: { label: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-zinc-600">
-      <span className="text-sm font-medium">{label}</span>
-      <span className="text-xs">Connect docmux WASM to enable conversion</span>
-    </div>
-  );
-}
+const OUTPUT_FORMATS = [
+  { value: "html", label: "HTML" },
+  { value: "latex", label: "LaTeX" },
+  { value: "typst", label: "Typst" },
+  { value: "markdown", label: "Markdown" },
+  { value: "plaintext", label: "Plain Text" },
+] as const;
+
+const FORMAT_TO_MONACO: Record<string, string> = {
+  html: "html",
+  latex: "latex",
+  typst: "plaintext",
+  markdown: "markdown",
+  plaintext: "plaintext",
+};
 
 export function OutputTabs() {
+  const { activeFileId } = useWorkspace();
+  const [outputFormat, setOutputFormat] = useState("html");
+
+  const file = useLiveQuery(
+    () => (activeFileId ? db.files.get(activeFileId) : undefined),
+    [activeFileId],
+  );
+
+  const inputFormat = file?.path ? getFormat(file.path) : null;
+  const content = file?.content ?? null;
+
+  const { preview, source, ast, errors, converting } = useConversion(
+    content,
+    inputFormat,
+    outputFormat,
+  );
+
   return (
     <Tabs defaultValue="preview" className="flex h-full flex-col">
-      <div className="flex items-center border-b border-zinc-800 px-3 py-1.5">
+      <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
         <TabsList variant="line" className="h-7 gap-0">
           <TabsTrigger value="preview" className="px-2 text-xs">
             Preview
@@ -25,21 +65,49 @@ export function OutputTabs() {
           </TabsTrigger>
           <TabsTrigger value="diagnostics" className="px-2 text-xs">
             Diagnostics
+            {errors.length > 0 && (
+              <span className="ml-1 rounded-full bg-red-900/60 px-1.5 text-[10px] text-red-300">
+                {errors.length}
+              </span>
+            )}
           </TabsTrigger>
         </TabsList>
+
+        <div className="ml-auto">
+          <Select value={outputFormat} onValueChange={setOutputFormat}>
+            <SelectTrigger className="h-6 w-28 border-zinc-700 bg-zinc-900 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {OUTPUT_FORMATS.map((f) => (
+                <SelectItem key={f.value} value={f.value} className="text-xs">
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <TabsContent value="preview" className="flex-1 overflow-auto">
-        <Placeholder label="Preview" />
+        <HtmlPreview html={preview} />
       </TabsContent>
       <TabsContent value="source" className="flex-1 overflow-auto">
-        <Placeholder label="Source Output" />
+        <ReadOnlyEditor
+          value={source}
+          language={FORMAT_TO_MONACO[outputFormat] ?? "plaintext"}
+          emptyMessage="Select a file and output format"
+        />
       </TabsContent>
       <TabsContent value="ast" className="flex-1 overflow-auto">
-        <Placeholder label="AST Inspector" />
+        <ReadOnlyEditor
+          value={ast}
+          language="json"
+          emptyMessage="Select a file to inspect its AST"
+        />
       </TabsContent>
       <TabsContent value="diagnostics" className="flex-1 overflow-auto">
-        <Placeholder label="Diagnostics" />
+        <DiagnosticsView errors={errors} converting={converting} />
       </TabsContent>
     </Tabs>
   );

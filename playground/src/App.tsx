@@ -6,10 +6,21 @@ import { Header } from "@/components/Header";
 import { FileTree } from "@/components/FileTree";
 import { Editor } from "@/components/Editor";
 import { OutputTabs } from "@/components/OutputTabs";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 
-function AutoSelectWorkspace() {
-  const { activeWorkspaceId, setActiveWorkspaceId } = useWorkspace();
+function AutoInit() {
+  const {
+    activeWorkspaceId,
+    activeFileId,
+    setActiveWorkspaceId,
+    setActiveFileId,
+  } = useWorkspace();
 
+  // Ensure a default workspace exists, then select it
   useEffect(() => {
     if (activeWorkspaceId) return;
     ensureDefaultWorkspace().then(async () => {
@@ -18,6 +29,18 @@ function AutoSelectWorkspace() {
     });
   }, [activeWorkspaceId, setActiveWorkspaceId]);
 
+  // Auto-select the first file when a workspace is active but no file is selected
+  useEffect(() => {
+    if (!activeWorkspaceId || activeFileId) return;
+    db.files
+      .where("workspaceId")
+      .equals(activeWorkspaceId)
+      .first()
+      .then((file) => {
+        if (file?.id) setActiveFileId(file.id);
+      });
+  }, [activeWorkspaceId, activeFileId, setActiveFileId]);
+
   return null;
 }
 
@@ -25,17 +48,19 @@ function Layout() {
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       <Header />
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-56 shrink-0 border-r border-zinc-800">
+      <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
+        <ResizablePanel defaultSize={16} minSize={12} maxSize={25}>
           <FileTree />
-        </div>
-        <div className="flex-1 min-w-0">
+        </ResizablePanel>
+        <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
+        <ResizablePanel defaultSize={44} minSize={25}>
           <Editor />
-        </div>
-        <div className="w-[420px] shrink-0 border-l border-zinc-800">
+        </ResizablePanel>
+        <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
+        <ResizablePanel defaultSize={40} minSize={20}>
           <OutputTabs />
-        </div>
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }
@@ -43,7 +68,7 @@ function Layout() {
 export default function App() {
   return (
     <WorkspaceProvider>
-      <AutoSelectWorkspace />
+      <AutoInit />
       <Layout />
       <Toaster theme="dark" position="bottom-right" />
     </WorkspaceProvider>
