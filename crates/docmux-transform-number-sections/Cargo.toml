@@ -1,0 +1,12 @@
+[package]
+name = "docmux-transform-number-sections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Section numbering transform for docmux"
+rust-version.workspace = true
+
+[dependencies]
+docmux-ast = { workspace = true }
+docmux-core = { workspace = true }

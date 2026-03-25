@@ -36,6 +36,7 @@ impl MarkdownReader {
         opts.extension.math_dollars = true;
         opts.extension.math_code = true;
         opts.extension.front_matter_delimiter = Some("---".into());
+        opts.extension.subscript = true;
         // Parse options
         opts.parse.smart = true;
         opts
@@ -305,12 +306,13 @@ impl MarkdownReader {
         None
     }
 
-    /// Collect inline children of a node.
+    /// Collect inline children of a node, applying bracketed-span post-processing.
     fn collect_inlines<'a>(&self, node: &'a AstNode<'a>) -> Vec<Inline> {
         let mut inlines = Vec::new();
         for child in node.children() {
             self.node_to_inlines(child, &mut inlines);
         }
+        postprocess_bracketed_spans(&mut inlines);
         inlines
     }
 
@@ -391,6 +393,10 @@ impl MarkdownReader {
             NodeValue::Superscript => {
                 let content = self.collect_inlines(node);
                 out.push(Inline::Superscript { content });
+            }
+            NodeValue::Subscript => {
+                let content = self.collect_inlines(node);
+                out.push(Inline::Subscript { content });
             }
             _ => {
                 // For unknown inlines, try to collect children
@@ -790,6 +796,126 @@ fn yaml_value_to_string(val: &serde_yaml::Value) -> Option<String> {
         serde_yaml::Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
+}
+
+// ─── Bracketed span post-processing ─────────────────────────────────────────
+
+/// Walk a `Vec<Inline>` in place and convert any `Text` node that contains
+/// the literal pattern `[content]{attrs}` into a `Span`.
+///
+/// comrak does not understand this syntax, so `[text]{.cls}` arrives as a
+/// single `Text("[text]{.cls}")`. We detect and replace it here.
+///
+/// Only the **last** such pattern in a given `Text` value is converted per
+/// pass; the function loops until no more patterns can be found.
+fn postprocess_bracketed_spans(inlines: &mut Vec<Inline>) {
+    let mut i = 0;
+    while i < inlines.len() {
+        // Recurse into container inlines first.
+        match &mut inlines[i] {
+            Inline::Emphasis { content }
+            | Inline::Strong { content }
+            | Inline::Strikethrough { content }
+            | Inline::Superscript { content }
+            | Inline::Subscript { content }
+            | Inline::SmallCaps { content }
+            | Inline::Underline { content }
+            | Inline::Span { content, .. }
+            | Inline::Link { content, .. } => {
+                postprocess_bracketed_spans(content);
+            }
+            _ => {}
+        }
+
+        if let Inline::Text { value } = &inlines[i] {
+            if let Some((before, span_text, attrs, after)) = try_parse_bracketed_span(value) {
+                let mut replacements: Vec<Inline> = Vec::new();
+                if !before.is_empty() {
+                    replacements.push(Inline::Text { value: before });
+                }
+                replacements.push(Inline::Span {
+                    content: vec![Inline::Text { value: span_text }],
+                    attrs,
+                });
+                if !after.is_empty() {
+                    replacements.push(Inline::Text { value: after });
+                }
+                let end = i + 1;
+                inlines.splice(i..end, replacements);
+                // Do NOT advance i — re-check from the same position so we
+                // handle multiple patterns in one Text node (the `before`
+                // portion may itself contain another span).
+                continue;
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Try to find and parse the pattern `[content]{attrs}` inside `s`.
+///
+/// Finds the **first** `[` in `s` and the matching `]` followed immediately
+/// by `{...}`. Returns `(before, span_text, attrs, after)` on success, or
+/// `None` if no valid pattern is found.
+fn try_parse_bracketed_span(s: &str) -> Option<(String, String, Attributes, String)> {
+    // Find the first '['.
+    let open_bracket = s.find('[')?;
+    // Find the matching ']' by tracking nesting.
+    let rest = &s[open_bracket + 1..];
+    let mut depth: usize = 1;
+    let mut close_bracket_rel: Option<usize> = None;
+    let chars: Vec<char> = rest.chars().collect();
+    let mut byte_pos = 0usize;
+    for &ch in &chars {
+        if ch == '[' {
+            depth += 1;
+        } else if ch == ']' {
+            depth -= 1;
+            if depth == 0 {
+                close_bracket_rel = Some(byte_pos);
+                break;
+            }
+        }
+        byte_pos += ch.len_utf8();
+    }
+    let close_bracket_rel = close_bracket_rel?;
+    let span_text = rest[..close_bracket_rel].to_string();
+
+    // The character immediately after ']' must be '{'.
+    let after_bracket = open_bracket + 1 + close_bracket_rel + 1;
+    if after_bracket >= s.len() {
+        return None;
+    }
+    if !s[after_bracket..].starts_with('{') {
+        return None;
+    }
+
+    // Find the matching '}'.
+    let brace_start = after_bracket;
+    let brace_rest = &s[brace_start..];
+    let mut brace_depth: usize = 0;
+    let mut brace_end_rel: Option<usize> = None;
+    let mut bp = 0usize;
+    for ch in brace_rest.chars() {
+        if ch == '{' {
+            brace_depth += 1;
+        } else if ch == '}' {
+            brace_depth -= 1;
+            if brace_depth == 0 {
+                brace_end_rel = Some(bp + ch.len_utf8());
+                break;
+            }
+        }
+        bp += ch.len_utf8();
+    }
+    let brace_end_rel = brace_end_rel?;
+    let attr_str = &s[brace_start..brace_start + brace_end_rel];
+    let normalized = normalize_smart_quotes(attr_str);
+    let attrs = parse_attr_block(&normalized)?;
+
+    let before = s[..open_bracket].to_string();
+    let after = s[brace_start + brace_end_rel..].to_string();
+    Some((before, span_text, attrs, after))
 }
 
 /// Convert a serde_yaml::Value into our MetaValue enum.
@@ -1330,5 +1456,110 @@ mod tests {
         assert!(parse_attr_block("no braces").is_none());
         assert!(parse_attr_block("{unclosed").is_none());
         assert!(parse_attr_block("unclosed}").is_none());
+    }
+
+    // ─── Subscript tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn subscript_tilde_syntax() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("H~2~O").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            // Expect: Text("H"), Subscript([Text("2")]), Text("O")
+            assert_eq!(content.len(), 3, "Expected 3 inlines, got: {:#?}", content);
+            assert!(matches!(&content[0], Inline::Text { value } if value == "H"));
+            match &content[1] {
+                Inline::Subscript { content: sub } => {
+                    assert_eq!(sub.len(), 1);
+                    assert!(matches!(&sub[0], Inline::Text { value } if value == "2"));
+                }
+                other => panic!("Expected Subscript, got {:?}", other),
+            }
+            assert!(matches!(&content[2], Inline::Text { value } if value == "O"));
+        } else {
+            panic!("Expected Paragraph");
+        }
+    }
+
+    // ─── Bracketed span tests ────────────────────────────────────────────────
+
+    #[test]
+    fn bracketed_span_basic() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("[text]{.highlight}").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            assert_eq!(content.len(), 1, "Expected 1 inline, got: {:#?}", content);
+            match &content[0] {
+                Inline::Span {
+                    content: inner,
+                    attrs,
+                } => {
+                    assert_eq!(inner.len(), 1);
+                    assert!(matches!(&inner[0], Inline::Text { value } if value == "text"));
+                    assert_eq!(attrs.classes, vec!["highlight"]);
+                    assert!(attrs.id.is_none());
+                }
+                other => panic!("Expected Span, got {:?}", other),
+            }
+        } else {
+            panic!("Expected Paragraph");
+        }
+    }
+
+    #[test]
+    fn bracketed_span_with_id() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("[text]{#myid .cls}").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            assert_eq!(content.len(), 1);
+            match &content[0] {
+                Inline::Span {
+                    content: inner,
+                    attrs,
+                } => {
+                    assert_eq!(inner.len(), 1);
+                    assert!(matches!(&inner[0], Inline::Text { value } if value == "text"));
+                    assert_eq!(attrs.id.as_deref(), Some("myid"));
+                    assert_eq!(attrs.classes, vec!["cls"]);
+                }
+                other => panic!("Expected Span, got {:?}", other),
+            }
+        } else {
+            panic!("Expected Paragraph");
+        }
+    }
+
+    #[test]
+    fn bracketed_span_in_paragraph() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("Before [text]{.cls} after").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            // Expect: Text("Before "), Span, Text(" after")
+            assert_eq!(content.len(), 3, "Expected 3 inlines, got: {:#?}", content);
+            assert!(matches!(&content[0], Inline::Text { value } if value == "Before "));
+            assert!(matches!(&content[1], Inline::Span { .. }));
+            assert!(matches!(&content[2], Inline::Text { value } if value == " after"));
+        } else {
+            panic!("Expected Paragraph");
+        }
+    }
+
+    #[test]
+    fn bracketed_span_invalid_attrs_left_as_text() {
+        // {world} is not a valid attr block → should NOT become a Span
+        let reader = MarkdownReader::new();
+        let doc = reader.read("[text]{world}").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            // Should remain as a plain Text node (comrak parses it as text)
+            let has_span = content.iter().any(|i| matches!(i, Inline::Span { .. }));
+            assert!(!has_span, "Should not have produced a Span: {:#?}", content);
+        } else {
+            panic!("Expected Paragraph");
+        }
     }
 }

@@ -7,10 +7,12 @@ use docmux_ast::{Block, Metadata};
 use docmux_core::{MathEngine, Registry, WriteOptions};
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
+use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
+use docmux_writer_plaintext::PlaintextWriter;
 use docmux_writer_typst::TypstWriter;
 use std::collections::HashMap;
 use std::io::Read;
@@ -85,10 +87,12 @@ fn build_registry() -> Registry {
     let mut reg = Registry::new();
     reg.add_reader(Box::new(MarkdownReader::new()));
     reg.add_reader(Box::new(LatexReader::new()));
+    reg.add_reader(Box::new(MystReader::new()));
     reg.add_reader(Box::new(TypstReader::new()));
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
     reg.add_writer(Box::new(MarkdownWriter::new()));
+    reg.add_writer(Box::new(PlaintextWriter::new()));
     reg.add_writer(Box::new(TypstWriter::new()));
     reg
 }

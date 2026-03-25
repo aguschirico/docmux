@@ -11,10 +11,13 @@ members = [
     "crates/docmux-writer-latex",
     "crates/docmux-writer-typst",
     "crates/docmux-writer-markdown",
+    "crates/docmux-writer-plaintext",
     "crates/docmux-writer-docx",
     "crates/docmux-transform-math",
     "crates/docmux-transform-cite",
     "crates/docmux-transform-crossref",
+    "crates/docmux-transform-toc",
+    "crates/docmux-transform-number-sections",
     "crates/docmux-cli",
     "crates/docmux-wasm",
 ]
@@ -39,10 +42,13 @@ docmux-writer-html = { path = "crates/docmux-writer-html" }
 docmux-writer-latex = { path = "crates/docmux-writer-latex" }
 docmux-writer-typst = { path = "crates/docmux-writer-typst" }
 docmux-writer-markdown = { path = "crates/docmux-writer-markdown" }
+docmux-writer-plaintext = { path = "crates/docmux-writer-plaintext" }
 docmux-writer-docx = { path = "crates/docmux-writer-docx" }
 docmux-transform-math = { path = "crates/docmux-transform-math" }
 docmux-transform-cite = { path = "crates/docmux-transform-cite" }
 docmux-transform-crossref = { path = "crates/docmux-transform-crossref" }
+docmux-transform-toc = { path = "crates/docmux-transform-toc" }
+docmux-transform-number-sections = { path = "crates/docmux-transform-number-sections" }
 
 # External dependencies
 thiserror = "2"

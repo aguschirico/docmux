@@ -52,7 +52,7 @@
 
 - [x] `docmux-reader-typst` — Typst markup parser (81 tests)
 - [x] `docmux-writer-typst` — Typst output (16 unit tests, 4 golden files)
-- [ ] `docmux-reader-myst` — MyST Markdown (directives, roles, cross-refs; needs `Div`)
+- [x] `docmux-reader-myst` — MyST Markdown: directives, roles, labels, recursive nesting (15 tests)
 
 ## Phase 3 — Production Features
 
@@ -79,23 +79,24 @@
 
 ### Pandoc parity — Extensions (markdown reader)
 
-- [ ] Smart punctuation (`--smart`)
-- [ ] Bracketed spans `[text]{.class}`
+- [x] Smart punctuation (`--smart`) — enabled via comrak `parse.smart`
+- [x] Bracketed spans `[text]{.class}` (5 tests)
 - [ ] `raw_attribute` syntax
 - [ ] Table captions
-- [ ] Superscript `^text^` / subscript `~text~` in markdown
+- [x] Subscript `~text~` in markdown (via comrak extension)
+- [x] Superscript `^text^` in markdown (via comrak extension)
 
 ### Transforms
 
 - [ ] `docmux-transform-cite` — CSL citation processing
-- [ ] `docmux-transform-toc` — table of contents generation
-- [ ] `docmux-transform-number-sections` — heading numbering
+- [x] `docmux-transform-toc` — table of contents generation (6 tests)
+- [x] `docmux-transform-number-sections` — heading numbering (7 tests)
 - [ ] `docmux-transform-math` — normalize math notation across formats
 
 ### Writers & readers
 
 - [x] `docmux-writer-markdown` — CommonMark/GFM roundtrip, normalization (28 tests)
-- [ ] Plain text writer — stripped output
+- [x] `docmux-writer-plaintext` — stripped text output (29 tests)
 - [ ] HTML reader — web content, HTML→LaTeX
 - [ ] DOCX writer — OOXML output via zip + XML generation
 

@@ -1,0 +1,30 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file_path=\"$TOOL_INPUT_FILE_PATH\"; if [ -n \"$file_path\" ] && echo \"$file_path\" | grep -qE '\\.(rs)$'; then cargo fmt --all 2>/dev/null; fi"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file_path=\"$TOOL_INPUT_FILE_PATH\"; if [ -n \"$file_path\" ] && echo \"$file_path\" | grep -qE '(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|Cargo\\.lock|\\.env)'; then echo 'BLOCK: Do not edit lock files or .env files directly. Use CLI tools (pnpm add, cargo add) for dependencies.' >&2; exit 2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -39,7 +39,7 @@ See `ROADMAP.md` for full status. Implemented:
 - `docmux-transform-crossref` (7 tests)
 - 13 golden file fixtures × 2 formats = 26 golden files
 
-Phase 2 complete (MyST reader in progress separately). Phase 3 in progress. Completed: Phase 3 AST enhancements (`Inline::Quoted`, attrs on inline `Code`/`Link`/`Image`, `Image.alt` as `Vec<Inline>`, per-key `CiteItem` prefix/suffix, `abstract_text` as `Vec<Block>`, table footer), Markdown writer (28 tests). Next: CLI features (`--toc`, `-N`, `--template`, etc.), transforms (cite, toc, number-sections), more writers/readers. Full gap analysis in `docs/pandoc-parity-check.md`.
+Phase 2 complete (MyST reader in progress separately). Phase 3 in progress. Completed: AST enhancements, Markdown writer (28 tests), plain text writer (29 tests), toc transform (6 tests), number-sections transform (7 tests), markdown reader extensions (bracketed spans, subscript). Next: wire `--toc`/`-N` CLI flags, CLI features (`--template`, `--wrap`, etc.), cite/math transforms, HTML reader, DOCX writer. Full gap analysis in `docs/pandoc-parity-check.md`.
 
 ## Coding conventions
 
