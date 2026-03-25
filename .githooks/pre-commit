@@ -69,7 +69,7 @@ if [ "$RUST_CHANGED" = true ]; then
     UNWRAP_FILES=""
     while IFS= read -r file; do
         if [[ "$file" == *.rs ]] && [[ "$file" != */tests/* ]] && [[ "$file" != */tests.rs ]]; then
-            if git diff --cached -- "$file" | grep '^\+' | grep -v '^\+\+\+' | grep -v '#\[cfg(test)\]' | grep -q '\.unwrap()'; then
+            if git diff --cached -- "$file" | grep '^+' | grep -v '^+++' | grep -v '#\[cfg(test)\]' | grep -qF '.unwrap()'; then
                 UNWRAP_FILES="$UNWRAP_FILES $file"
             fi
         fi
