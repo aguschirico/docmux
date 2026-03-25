@@ -1,13 +1,11 @@
 import { useLiveQuery } from "dexie-react-hooks";
-import { FolderOpen, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { FolderOpen, Plus, ChevronDown } from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { db, createWorkspace } from "@/vfs/db";
 import { importFolder } from "@/vfs/import";
@@ -17,6 +15,8 @@ export function Header() {
   const { activeWorkspaceId, setActiveWorkspaceId, setActiveFileId } =
     useWorkspace();
   const workspaces = useLiveQuery(() => db.workspaces.toArray());
+
+  const activeWs = workspaces?.find((ws) => ws.id === activeWorkspaceId);
 
   async function handleNewWorkspace() {
     try {
@@ -42,55 +42,54 @@ export function Header() {
   }
 
   return (
-    <header className="flex h-12 items-center gap-3 border-b border-zinc-800 bg-zinc-950 px-4">
+    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-950 px-4">
       <span className="text-sm font-semibold tracking-tight text-zinc-100">
-        docmux playground
+        docmux
       </span>
 
-      <HeaderSeparator />
+      <div className="h-4 w-px bg-zinc-800" />
 
-      <Select
-        value={activeWorkspaceId?.toString() ?? ""}
-        onValueChange={(val) => {
-          setActiveWorkspaceId(Number(val));
-          setActiveFileId(null);
-        }}
-      >
-        <SelectTrigger className="h-8 w-48 text-xs">
-          <SelectValue placeholder="Select workspace" />
-        </SelectTrigger>
-        <SelectContent>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+        >
+          <span className="max-w-40 truncate">
+            {activeWs?.name ?? "Select workspace"}
+          </span>
+          <ChevronDown className="h-3 w-3 text-zinc-500" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
           {workspaces?.map((ws) => (
-            <SelectItem key={ws.id} value={ws.id!.toString()}>
+            <DropdownMenuItem
+              key={ws.id}
+              onClick={() => {
+                setActiveWorkspaceId(ws.id!);
+                setActiveFileId(null);
+              }}
+            >
               {ws.name}
-            </SelectItem>
+            </DropdownMenuItem>
           ))}
-        </SelectContent>
-      </Select>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 gap-1.5 text-xs"
+      <div className="flex-1" />
+
+      <button
+        className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
         onClick={handleImportFolder}
       >
         <FolderOpen className="h-3.5 w-3.5" />
-        Import Folder
-      </Button>
+        Import
+      </button>
 
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 gap-1.5 text-xs"
+      <button
+        className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
         onClick={handleNewWorkspace}
       >
         <Plus className="h-3.5 w-3.5" />
         New
-      </Button>
+      </button>
     </header>
   );
-}
-
-function HeaderSeparator() {
-  return <div className="h-4 w-px bg-zinc-800" />;
 }
