@@ -34,7 +34,7 @@ export function FileTree() {
 
   return (
     <>
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-w-[180px] flex-col">
         <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
           <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
             Files

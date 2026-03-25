@@ -8,3 +8,4 @@ node_modules/
 *.wasm
 playground/dist/
 playground/wasm-pkg/
+/.playwright-mcp

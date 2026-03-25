@@ -52,11 +52,11 @@ function Layout() {
         direction="horizontal"
         className="flex-1 overflow-hidden"
       >
-        <ResizablePanel defaultSize={16} minSize={10} maxSize={30}>
+        <ResizablePanel defaultSize="200px" minSize="160px" maxSize="350px">
           <FileTree />
         </ResizablePanel>
         <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
-        <ResizablePanel defaultSize={44} minSize={20}>
+        <ResizablePanel defaultSize={42} minSize={20}>
           <Editor />
         </ResizablePanel>
         <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
