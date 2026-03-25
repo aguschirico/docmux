@@ -790,6 +790,80 @@ mod tests {
     }
 
     #[test]
+    fn table() {
+        let doc = Document {
+            content: vec![Block::Table(Table {
+                caption: Some(vec![Inline::text("Results")]),
+                label: Some("tab:results".into()),
+                columns: vec![
+                    ColumnSpec {
+                        alignment: Alignment::Left,
+                        width: None,
+                    },
+                    ColumnSpec {
+                        alignment: Alignment::Right,
+                        width: None,
+                    },
+                ],
+                header: Some(vec![
+                    TableCell {
+                        content: vec![Block::text("Name")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                    TableCell {
+                        content: vec![Block::text("Value")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                ]),
+                rows: vec![vec![
+                    TableCell {
+                        content: vec![Block::text("Pi")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                    TableCell {
+                        content: vec![Block::text("3.14")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                ]],
+                attrs: None,
+            })],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("#table("));
+        assert!(typ.contains("columns: 2"));
+        assert!(typ.contains("[Name]"));
+        assert!(typ.contains("[Pi]"));
+        assert!(typ.contains("<tab:results>"));
+    }
+
+    #[test]
+    fn figure_with_caption() {
+        let doc = Document {
+            content: vec![Block::Figure {
+                image: Image {
+                    url: "diagram.png".into(),
+                    alt: "Architecture".into(),
+                    title: None,
+                },
+                caption: Some(vec![Inline::text("System architecture")]),
+                label: Some("fig:arch".into()),
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("#figure("));
+        assert!(typ.contains("image(\"diagram.png\")"));
+        assert!(typ.contains("caption: [System architecture]"));
+        assert!(typ.contains("<fig:arch>"));
+    }
+
+    #[test]
     fn standalone_mode() {
         let doc = Document {
             metadata: Metadata {
