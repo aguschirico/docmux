@@ -92,7 +92,7 @@ impl TypstWriter {
         }
     }
 
-    fn write_inline(&self, inline: &Inline, _opts: &WriteOptions, out: &mut String) {
+    fn write_inline(&self, inline: &Inline, opts: &WriteOptions, out: &mut String) {
         match inline {
             Inline::Text { value } => {
                 out.push_str(&escape_typst(value));
@@ -103,7 +103,99 @@ impl TypstWriter {
             Inline::HardBreak => {
                 out.push_str("\\ \n");
             }
-            _ => {}
+            Inline::Emphasis { content } => {
+                out.push('_');
+                self.write_inlines(content, opts, out);
+                out.push('_');
+            }
+            Inline::Strong { content } => {
+                out.push('*');
+                self.write_inlines(content, opts, out);
+                out.push('*');
+            }
+            Inline::Strikethrough { content } => {
+                out.push_str("#strike[");
+                self.write_inlines(content, opts, out);
+                out.push(']');
+            }
+            Inline::Code { value } => {
+                out.push('`');
+                out.push_str(value);
+                out.push('`');
+            }
+            Inline::MathInline { value } => {
+                out.push('$');
+                out.push_str(value);
+                out.push('$');
+            }
+            Inline::Link { url, content, .. } => {
+                out.push_str(&format!("#link(\"{}\")", escape_typst_url(url)));
+                if !content.is_empty() {
+                    out.push('[');
+                    self.write_inlines(content, opts, out);
+                    out.push(']');
+                }
+            }
+            Inline::Image(img) => {
+                out.push_str(&format!("#image(\"{}\"", escape_typst_url(&img.url)));
+                if !img.alt.is_empty() {
+                    out.push_str(&format!(", alt: \"{}\"", escape_typst_url(&img.alt)));
+                }
+                out.push(')');
+            }
+            Inline::Superscript { content } => {
+                out.push_str("#super[");
+                self.write_inlines(content, opts, out);
+                out.push(']');
+            }
+            Inline::Subscript { content } => {
+                out.push_str("#sub[");
+                self.write_inlines(content, opts, out);
+                out.push(']');
+            }
+            Inline::SmallCaps { content } => {
+                out.push_str("#smallcaps[");
+                self.write_inlines(content, opts, out);
+                out.push(']');
+            }
+            Inline::Underline { content } => {
+                out.push_str("#underline[");
+                self.write_inlines(content, opts, out);
+                out.push(']');
+            }
+            Inline::Span { content, .. } => {
+                self.write_inlines(content, opts, out);
+            }
+            Inline::RawInline { format, content } => {
+                if format == "typst" || format == "typ" {
+                    out.push_str(content);
+                }
+            }
+            Inline::Citation(cite) => {
+                if let Some(prefix) = &cite.prefix {
+                    out.push_str(&escape_typst(prefix));
+                    out.push(' ');
+                }
+                for (i, key) in cite.keys.iter().enumerate() {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    out.push('@');
+                    out.push_str(key);
+                }
+                if let Some(suffix) = &cite.suffix {
+                    out.push(' ');
+                    out.push_str(&escape_typst(suffix));
+                }
+            }
+            Inline::CrossRef(cr) => {
+                out.push('@');
+                out.push_str(&cr.target);
+            }
+            Inline::FootnoteRef { id } => {
+                // Placeholder — real footnote expansion comes in Task 4
+                out.push_str(&format!("#footnote[See footnote {}]", escape_typst(id)));
+            }
         }
     }
 
@@ -262,5 +354,72 @@ mod tests {
         let typ = write_typst(&doc);
         assert!(typ.contains("$\nE = m c^2\n$"));
         assert!(typ.contains("<eq:einstein>"));
+    }
+
+    #[test]
+    fn emphasis_and_strong() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Emphasis {
+                        content: vec![Inline::text("italic")],
+                    },
+                    Inline::text(" and "),
+                    Inline::Strong {
+                        content: vec![Inline::text("bold")],
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("_italic_"));
+        assert!(typ.contains("*bold*"));
+    }
+
+    #[test]
+    fn inline_code_and_math() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Code {
+                        value: "x + 1".into(),
+                    },
+                    Inline::text(" and "),
+                    Inline::MathInline {
+                        value: "x^2".into(),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("`x + 1`"));
+        assert!(typ.contains("$x^2$"));
+    }
+
+    #[test]
+    fn link_and_image() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Link {
+                        url: "https://example.com".into(),
+                        title: None,
+                        content: vec![Inline::text("Example")],
+                    },
+                    Inline::text(" "),
+                    Inline::Image(Image {
+                        url: "photo.png".into(),
+                        alt: "A photo".into(),
+                        title: None,
+                    }),
+                ],
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains(r#"#link("https://example.com")[Example]"#));
+        assert!(typ.contains(r#"#image("photo.png", alt: "A photo")"#));
     }
 }
