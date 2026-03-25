@@ -39,7 +39,7 @@ See `ROADMAP.md` for full status. Implemented:
 - `docmux-transform-crossref` (7 tests)
 - 13 golden file fixtures × 2 formats = 26 golden files
 
-Phase 2 in progress. Completed: LaTeX reader, Typst reader (81 tests). Next: npm package, cite transform, math transform.
+Phase 2 in progress. Completed: LaTeX reader, Typst reader (81 tests), pandoc parity AST changes (Div, Underline, attrs, tight lists, list styles), CLI upgrade (JSON dump, stdin, multi-file, heading shift, metadata, math engine, verbose/quiet), GFM-style auto heading IDs. Next: header/code attrs in markdown, Typst writer, MyST reader. Full gap analysis in `docs/pandoc-parity-check.md`.
 
 ## Coding conventions
 
