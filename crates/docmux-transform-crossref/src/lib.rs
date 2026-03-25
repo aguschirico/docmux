@@ -153,6 +153,9 @@ fn collect_labels_from_block(
         Block::FootnoteDef { content, .. } => {
             collect_labels_from_blocks(content, map, counters);
         }
+        Block::Div { content, .. } => {
+            collect_labels_from_blocks(content, map, counters);
+        }
         _ => {}
     }
 }
@@ -182,6 +185,7 @@ fn resolve_block(block: &mut Block, labels: &HashMap<String, ResolvedLabel>) {
             }
         }
         Block::FootnoteDef { content, .. } => resolve_blocks(content, labels),
+        Block::Div { content, .. } => resolve_blocks(content, labels),
         Block::Figure {
             caption: Some(cap), ..
         } => {
@@ -219,6 +223,7 @@ fn resolve_inline(inline: &mut Inline, labels: &HashMap<String, ResolvedLabel>) 
         | Inline::Superscript { content }
         | Inline::Subscript { content }
         | Inline::SmallCaps { content }
+        | Inline::Underline { content }
         | Inline::Span { content, .. }
         | Inline::Link { content, .. } => {
             resolve_inlines(content, labels);
@@ -279,6 +284,7 @@ mod tests {
                     },
                     caption: Some(vec![Inline::text("First")]),
                     label: Some("fig:a".into()),
+                    attrs: None,
                 },
                 Block::Figure {
                     image: Image {
@@ -288,6 +294,7 @@ mod tests {
                     },
                     caption: Some(vec![Inline::text("Second")]),
                     label: Some("fig:b".into()),
+                    attrs: None,
                 },
                 Block::Paragraph {
                     content: vec![
@@ -343,6 +350,7 @@ mod tests {
                     columns: vec![],
                     header: None,
                     rows: vec![],
+                    attrs: None,
                 }),
                 Block::MathBlock {
                     content: "F = ma".into(),
@@ -428,6 +436,7 @@ mod tests {
                     },
                     caption: None,
                     label: Some("fig:x".into()),
+                    attrs: None,
                 },
                 Block::Paragraph {
                     content: vec![Inline::CrossRef(CrossRef {
@@ -498,11 +507,13 @@ mod tests {
                     level: 1,
                     id: Some("sec:intro".into()),
                     content: vec![Inline::text("Introduction")],
+                    attrs: None,
                 },
                 Block::Heading {
                     level: 2,
                     id: Some("sec:methods".into()),
                     content: vec![Inline::text("Methods")],
+                    attrs: None,
                 },
                 Block::Paragraph {
                     content: vec![Inline::CrossRef(CrossRef {

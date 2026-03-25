@@ -156,6 +156,7 @@ impl MarkdownReader {
                     level: h.level,
                     id: None, // Could compute from content
                     content,
+                    attrs: None,
                 })
             }
             NodeValue::CodeBlock(cb) => {
@@ -169,6 +170,7 @@ impl MarkdownReader {
                     content: cb.literal.clone(),
                     caption: None,
                     label: None,
+                    attrs: None,
                 })
             }
             NodeValue::BlockQuote => {
@@ -202,6 +204,9 @@ impl MarkdownReader {
                     ordered,
                     start,
                     items,
+                    tight: list.tight,
+                    style: None,
+                    delimiter: None,
                 })
             }
             NodeValue::Table(..) => {
@@ -408,6 +413,7 @@ impl MarkdownReader {
             columns,
             header,
             rows,
+            attrs: None,
         }
     }
 }

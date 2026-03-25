@@ -27,7 +27,9 @@ impl HtmlWriter {
                 self.write_inlines(content, opts, out);
                 out.push_str("</p>\n");
             }
-            Block::Heading { level, id, content } => {
+            Block::Heading {
+                level, id, content, ..
+            } => {
                 let tag = format!("h{}", level.min(&6));
                 if let Some(id) = id {
                     out.push_str(&format!("<{tag} id=\"{}\">", escape_attr(id)));
@@ -77,6 +79,7 @@ impl HtmlWriter {
                 ordered,
                 start,
                 items,
+                ..
             } => {
                 if *ordered {
                     if let Some(s) = start {
@@ -118,6 +121,7 @@ impl HtmlWriter {
                 image,
                 caption,
                 label,
+                ..
             } => {
                 if let Some(label) = label {
                     out.push_str(&format!("<figure id=\"{}\">", escape_attr(label)));
@@ -191,6 +195,21 @@ impl HtmlWriter {
                     }
                 }
                 out.push_str("</dl>\n");
+            }
+            Block::Div { attrs, content } => {
+                let mut attr_str = String::new();
+                if let Some(id) = &attrs.id {
+                    attr_str.push_str(&format!(" id=\"{}\"", escape_attr(id)));
+                }
+                if !attrs.classes.is_empty() {
+                    attr_str.push_str(&format!(" class=\"{}\"", attrs.classes.join(" ")));
+                }
+                for (k, v) in &attrs.key_values {
+                    attr_str.push_str(&format!(" data-{}=\"{}\"", escape_attr(k), escape_attr(v)));
+                }
+                out.push_str(&format!("<div{attr_str}>\n"));
+                self.write_blocks(content, opts, out);
+                out.push_str("</div>\n");
             }
             Block::FootnoteDef { id, content } => {
                 out.push_str(&format!(
@@ -388,6 +407,11 @@ impl HtmlWriter {
             Inline::HardBreak => {
                 out.push_str("<br>\n");
             }
+            Inline::Underline { content } => {
+                out.push_str("<u>");
+                self.write_inlines(content, opts, out);
+                out.push_str("</u>");
+            }
             Inline::Span { content, attrs } => {
                 let mut attr_str = String::new();
                 if let Some(id) = &attrs.id {
@@ -510,6 +534,7 @@ mod tests {
                 level: 2,
                 id: Some("intro".into()),
                 content: vec![Inline::text("Introduction")],
+                attrs: None,
             }],
             ..Default::default()
         };
@@ -544,6 +569,7 @@ mod tests {
                 content: "print('hello')".into(),
                 caption: None,
                 label: None,
+                attrs: None,
             }],
             ..Default::default()
         };

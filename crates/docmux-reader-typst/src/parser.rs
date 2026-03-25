@@ -460,6 +460,7 @@ impl Parser {
                 level,
                 id: id.or(Some(label_name)),
                 content,
+                attrs: None,
             },
             Block::MathBlock { content, label, .. } => Block::MathBlock {
                 content,
@@ -476,6 +477,7 @@ impl Parser {
                 content,
                 caption,
                 label: label.or(Some(label_name)),
+                attrs: None,
             },
             Block::Figure {
                 image,
@@ -486,6 +488,7 @@ impl Parser {
                 image,
                 caption,
                 label: label.or(Some(label_name)),
+                attrs: None,
             },
             Block::Table(mut t) => {
                 if t.label.is_none() {
@@ -531,7 +534,12 @@ impl Parser {
             }
         }
 
-        Block::Heading { level, id, content }
+        Block::Heading {
+            level,
+            id,
+            content,
+            attrs: None,
+        }
     }
 
     // ── Paragraph ───────────────────────────────────────────────────────────
@@ -700,6 +708,7 @@ impl Parser {
             content,
             caption: None,
             label: None,
+            attrs: None,
         }
     }
 
@@ -728,6 +737,9 @@ impl Parser {
             ordered: false,
             start: None,
             items,
+            tight: true,
+            style: None,
+            delimiter: None,
         }
     }
 
@@ -753,6 +765,9 @@ impl Parser {
             ordered: true,
             start: Some(1),
             items,
+            tight: true,
+            style: None,
+            delimiter: None,
         }
     }
 
@@ -1456,6 +1471,7 @@ impl Parser {
             level,
             id: None,
             content: inlines,
+            attrs: None,
         }
     }
 
@@ -1487,6 +1503,7 @@ impl Parser {
             },
             caption: None,
             label: None,
+            attrs: None,
         }
     }
 
@@ -1535,6 +1552,7 @@ impl Parser {
             image,
             caption,
             label,
+            attrs: None,
         }
     }
 
@@ -1617,6 +1635,7 @@ impl Parser {
             columns,
             header,
             rows,
+            attrs: None,
         })
     }
 
@@ -2265,6 +2284,7 @@ mod tests {
                 ordered,
                 items,
                 start,
+                ..
             } => {
                 assert!(!ordered);
                 assert!(start.is_none());
@@ -2283,6 +2303,7 @@ mod tests {
                 ordered,
                 items,
                 start,
+                ..
             } => {
                 assert!(ordered);
                 assert_eq!(*start, Some(1));

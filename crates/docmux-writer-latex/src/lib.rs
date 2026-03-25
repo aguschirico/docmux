@@ -27,7 +27,9 @@ impl LatexWriter {
                 self.write_inlines(content, opts, out);
                 out.push_str("\n\n");
             }
-            Block::Heading { level, id, content } => {
+            Block::Heading {
+                level, id, content, ..
+            } => {
                 let cmd = match level {
                     1 => "section",
                     2 => "subsection",
@@ -82,6 +84,7 @@ impl LatexWriter {
                 ordered,
                 start,
                 items,
+                ..
             } => {
                 let env = if *ordered { "enumerate" } else { "itemize" };
                 out.push_str(&format!("\\begin{{{env}}}\n"));
@@ -114,6 +117,7 @@ impl LatexWriter {
                 image,
                 caption,
                 label,
+                ..
             } => {
                 out.push_str("\\begin{figure}[htbp]\n");
                 out.push_str("\\centering\n");
@@ -178,6 +182,10 @@ impl LatexWriter {
                     }
                 }
                 out.push_str("\\end{description}\n");
+            }
+            Block::Div { content, .. } => {
+                // LaTeX has no generic div; emit content directly
+                self.write_blocks(content, opts, out);
             }
             Block::FootnoteDef { id, content } => {
                 // Footnotes in LaTeX are typically inline (\footnote{...}),
@@ -398,6 +406,11 @@ impl LatexWriter {
             }
             Inline::HardBreak => {
                 out.push_str("\\\\\n");
+            }
+            Inline::Underline { content } => {
+                out.push_str("\\underline{");
+                self.write_inlines(content, opts, out);
+                out.push('}');
             }
             Inline::Span { content, .. } => {
                 // LaTeX doesn't have a generic span; just emit content
@@ -625,6 +638,7 @@ mod tests {
                 content: "print('hello')".into(),
                 caption: None,
                 label: None,
+                attrs: None,
             }],
             ..Default::default()
         };

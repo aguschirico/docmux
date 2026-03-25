@@ -84,6 +84,9 @@ pub enum Block {
         level: u8,
         id: Option<String>,
         content: Vec<Inline>,
+        /// Extra attributes (classes, key-value pairs) from source format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attrs: Option<Attributes>,
     },
 
     /// A fenced or indented code block.
@@ -92,6 +95,9 @@ pub enum Block {
         content: String,
         caption: Option<Vec<Inline>>,
         label: Option<String>,
+        /// Extra attributes (classes, key-value pairs) from source format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attrs: Option<Attributes>,
     },
 
     /// A display-math block (e.g. `$$…$$`).
@@ -108,6 +114,15 @@ pub enum Block {
         ordered: bool,
         start: Option<u32>,
         items: Vec<ListItem>,
+        /// Whether items are tight (no `<p>` wrapping) or loose.
+        #[serde(default)]
+        tight: bool,
+        /// Number style for ordered lists (e.g. decimal, lower-alpha).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        style: Option<ListStyle>,
+        /// Delimiter for ordered lists (e.g. period, paren).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delimiter: Option<ListDelim>,
     },
 
     /// A table with optional caption and column specs.
@@ -118,6 +133,9 @@ pub enum Block {
         image: Image,
         caption: Option<Vec<Inline>>,
         label: Option<String>,
+        /// Extra attributes (classes, key-value pairs) from source format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attrs: Option<Attributes>,
     },
 
     /// A thematic break (`---`).
@@ -139,6 +157,13 @@ pub enum Block {
 
     /// A footnote definition (referenced by `Inline::FootnoteRef`).
     FootnoteDef { id: String, content: Vec<Block> },
+
+    /// A generic block container with attributes (id, classes, key-value pairs).
+    /// Used for fenced divs, MyST directives, and arbitrary block wrappers.
+    Div {
+        attrs: Attributes,
+        content: Vec<Block>,
+    },
 }
 
 /// A single item inside a `Block::List`.
@@ -147,6 +172,32 @@ pub struct ListItem {
     /// `None` = normal list item; `Some(true/false)` = task-list checkbox.
     pub checked: Option<bool>,
     pub content: Vec<Block>,
+}
+
+/// Number style for ordered lists.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ListStyle {
+    /// 1, 2, 3, …
+    Decimal,
+    /// a, b, c, …
+    LowerAlpha,
+    /// A, B, C, …
+    UpperAlpha,
+    /// i, ii, iii, …
+    LowerRoman,
+    /// I, II, III, …
+    UpperRoman,
+}
+
+/// Delimiter style for ordered list markers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ListDelim {
+    /// `1.`
+    Period,
+    /// `1)`
+    OneParen,
+    /// `(1)`
+    TwoParens,
 }
 
 // ─── Table ───────────────────────────────────────────────────────────────────
@@ -159,6 +210,9 @@ pub struct Table {
     pub columns: Vec<ColumnSpec>,
     pub header: Option<Vec<TableCell>>,
     pub rows: Vec<Vec<TableCell>>,
+    /// Extra attributes (id, classes, key-value pairs) from source format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attrs: Option<Attributes>,
 }
 
 /// Column specification: alignment + optional relative width.
@@ -275,6 +329,9 @@ pub enum Inline {
 
     /// A hard line break (`<br>`).
     HardBreak,
+
+    /// Underlined content.
+    Underline { content: Vec<Inline> },
 
     /// A generic span with attributes (id, classes, key-value pairs).
     Span {
@@ -410,6 +467,7 @@ impl Block {
             level,
             id: None,
             content: vec![Inline::Text { value: text.into() }],
+            attrs: None,
         }
     }
 }
@@ -508,6 +566,7 @@ mod tests {
                     rowspan: 1,
                 },
             ]],
+            attrs: None,
         };
         assert_eq!(table.rows.len(), 1);
         assert_eq!(table.columns.len(), 2);

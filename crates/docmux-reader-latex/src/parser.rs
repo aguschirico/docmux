@@ -347,7 +347,12 @@ impl Parser {
                             // Peek for \label{...} after the heading.
                             let id = self.peek_label();
 
-                            blocks.push(Block::Heading { level, id, content });
+                            blocks.push(Block::Heading {
+                                level,
+                                id,
+                                content,
+                                attrs: None,
+                            });
                             continue;
                         }
                         "hrule" => {
@@ -929,6 +934,9 @@ impl Parser {
             ordered,
             start: if ordered { Some(1) } else { None },
             items,
+            tight: false,
+            style: None,
+            delimiter: None,
         }
     }
 
@@ -1017,6 +1025,7 @@ impl Parser {
             content,
             caption: None,
             label: None,
+            attrs: None,
         }
     }
 
@@ -1207,6 +1216,7 @@ impl Parser {
             },
             caption,
             label,
+            attrs: None,
         }
     }
 
@@ -1270,6 +1280,7 @@ impl Parser {
             columns: Vec::new(),
             header: None,
             rows: Vec::new(),
+            attrs: None,
         });
 
         t.caption = caption;
@@ -1399,6 +1410,7 @@ impl Parser {
             columns,
             header,
             rows,
+            attrs: None,
         }
     }
 
@@ -1800,6 +1812,7 @@ E = mc^2
             image,
             caption,
             label,
+            ..
         } = &doc.content[0]
         {
             assert_eq!(image.url, "image.png");
