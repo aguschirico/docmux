@@ -48,12 +48,15 @@ function Layout() {
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       <Header />
-      <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
-        <ResizablePanel defaultSize={16} minSize={12} maxSize={25}>
+      <ResizablePanelGroup
+        direction="horizontal"
+        className="flex-1 overflow-hidden"
+      >
+        <ResizablePanel defaultSize={16} minSize={10} maxSize={30}>
           <FileTree />
         </ResizablePanel>
         <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
-        <ResizablePanel defaultSize={44} minSize={25}>
+        <ResizablePanel defaultSize={44} minSize={20}>
           <Editor />
         </ResizablePanel>
         <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
