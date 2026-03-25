@@ -21,11 +21,66 @@ impl TypstWriter {
     }
 
     fn write_block(&self, block: &Block, opts: &WriteOptions, out: &mut String) {
-        #[allow(clippy::single_match)]
         match block {
             Block::Paragraph { content } => {
                 self.write_inlines(content, opts, out);
                 out.push_str("\n\n");
+            }
+            Block::Heading {
+                level, id, content, ..
+            } => {
+                for _ in 0..*level {
+                    out.push('=');
+                }
+                out.push(' ');
+                self.write_inlines(content, opts, out);
+                if let Some(id) = id {
+                    out.push_str(&format!(" <{}>", id));
+                }
+                out.push('\n');
+            }
+            Block::CodeBlock {
+                language,
+                content,
+                caption,
+                label,
+                ..
+            } => {
+                if caption.is_some() || label.is_some() {
+                    out.push_str("#figure(\n");
+                    if let Some(cap) = caption {
+                        out.push_str("  caption: [");
+                        self.write_inlines(cap, opts, out);
+                        out.push_str("],\n");
+                    }
+                    out.push_str(")[\n");
+                }
+                out.push_str("```");
+                if let Some(lang) = language {
+                    out.push_str(lang);
+                }
+                out.push('\n');
+                out.push_str(content);
+                if !content.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str("```\n");
+                if caption.is_some() || label.is_some() {
+                    out.push(']');
+                    if let Some(label) = label {
+                        out.push_str(&format!(" <{}>", label));
+                    }
+                    out.push('\n');
+                }
+            }
+            Block::MathBlock { content, label } => {
+                out.push_str("$\n");
+                out.push_str(content.trim());
+                out.push_str("\n$");
+                if let Some(label) = label {
+                    out.push_str(&format!(" <{}>", label));
+                }
+                out.push('\n');
             }
             _ => {}
         }
@@ -162,5 +217,50 @@ mod tests {
         let writer = TypstWriter::new();
         assert_eq!(writer.format(), "typst");
         assert_eq!(writer.default_extension(), "typ");
+    }
+
+    #[test]
+    fn heading_with_label() {
+        let doc = Document {
+            content: vec![Block::Heading {
+                level: 2,
+                id: Some("intro".into()),
+                content: vec![Inline::text("Introduction")],
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert_eq!(typ.trim(), "== Introduction <intro>");
+    }
+
+    #[test]
+    fn code_block() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("python".into()),
+                content: "print('hello')".into(),
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("```python\nprint('hello')\n```"));
+    }
+
+    #[test]
+    fn math_block_with_label() {
+        let doc = Document {
+            content: vec![Block::MathBlock {
+                content: "E = m c^2".into(),
+                label: Some("eq:einstein".into()),
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("$\nE = m c^2\n$"));
+        assert!(typ.contains("<eq:einstein>"));
     }
 }
