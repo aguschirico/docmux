@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, updateFileContent } from "@/vfs/db";
 import { debounce } from "@/lib/debounce";
@@ -12,15 +12,14 @@ export function useActiveFile(fileId: number | null) {
   );
 
   const [localContent, setLocalContent] = useState("");
-  const lastLoadedId = useRef<number | null>(null);
+  const [loadedFileId, setLoadedFileId] = useState<number | null>(null);
 
-  // Sync local content when file changes (new file selected or external update)
-  useEffect(() => {
-    if (file && file.id !== lastLoadedId.current) {
-      setLocalContent(file.content);
-      lastLoadedId.current = file.id ?? null;
-    }
-  }, [file]);
+  // Render-time state adjustment: sync content when a different file is selected.
+  // See https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  if (file && file.id !== loadedFileId) {
+    setLocalContent(file.content);
+    setLoadedFileId(file.id ?? null);
+  }
 
   const debouncedSave = useRef(
     debounce((id: number, content: string) => {

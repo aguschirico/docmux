@@ -38,11 +38,10 @@ export function useConversion(
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const seqRef = useRef(0);
 
+  const hasInput = content !== null && inputFormat !== null;
+
   useEffect(() => {
-    if (!content || !inputFormat) {
-      setState(INITIAL);
-      return;
-    }
+    if (!hasInput) return;
 
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
@@ -54,7 +53,6 @@ export function useConversion(
         convert(content, inputFormat, outputFormat),
         parseToJson(content, inputFormat),
       ]).then(([previewResult, sourceResult, astResult]) => {
-        // Stale result — a newer conversion was triggered
         if (seq !== seqRef.current) return;
 
         const errors: string[] = [];
@@ -76,7 +74,8 @@ export function useConversion(
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timerRef.current);
-  }, [content, inputFormat, outputFormat]);
+  }, [content, inputFormat, outputFormat, hasInput]);
 
+  if (!hasInput) return INITIAL;
   return state;
 }
