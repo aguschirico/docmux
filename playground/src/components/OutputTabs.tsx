@@ -21,7 +21,7 @@ const OUTPUT_FORMATS = [
   { value: "latex", label: "LaTeX" },
   { value: "typst", label: "Typst" },
   { value: "markdown", label: "Markdown" },
-  { value: "plaintext", label: "Plain Text" },
+  { value: "plain", label: "Plain Text" },
 ] as const;
 
 const FORMAT_TO_MONACO: Record<string, string> = {
@@ -29,7 +29,7 @@ const FORMAT_TO_MONACO: Record<string, string> = {
   latex: "latex",
   typst: "plaintext",
   markdown: "markdown",
-  plaintext: "plaintext",
+  plain: "plaintext",
 };
 
 export function OutputTabs() {
@@ -56,10 +56,25 @@ export function OutputTabs() {
         <TabsList variant="line" className="h-7 gap-0">
           <TabsTrigger value="preview" className="px-2 text-xs">
             Preview
+            <span className="ml-1 text-[10px] text-zinc-500">HTML</span>
           </TabsTrigger>
           <TabsTrigger value="source" className="px-2 text-xs">
             Source
           </TabsTrigger>
+          <div className="ml-0.5">
+            <Select value={outputFormat} onValueChange={setOutputFormat}>
+              <SelectTrigger className="h-5 w-24 border-zinc-700 bg-zinc-900 text-[10px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {OUTPUT_FORMATS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">
+                    {f.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <TabsTrigger value="ast" className="px-2 text-xs">
             AST
           </TabsTrigger>
@@ -73,20 +88,7 @@ export function OutputTabs() {
           </TabsTrigger>
         </TabsList>
 
-        <div className="ml-auto">
-          <Select value={outputFormat} onValueChange={setOutputFormat}>
-            <SelectTrigger className="h-6 w-28 border-zinc-700 bg-zinc-900 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {OUTPUT_FORMATS.map((f) => (
-                <SelectItem key={f.value} value={f.value} className="text-xs">
-                  {f.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <div className="ml-auto" />
       </div>
 
       <TabsContent value="preview" className="flex-1 overflow-auto">

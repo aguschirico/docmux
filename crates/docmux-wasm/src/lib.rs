@@ -9,6 +9,8 @@ use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
 use docmux_transform_crossref::CrossRefTransform;
+use docmux_transform_number_sections::NumberSectionsTransform;
+use docmux_transform_toc::TocTransform;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
@@ -65,10 +67,11 @@ fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<
         .read(input)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    // Run cross-reference transform (auto-numbers figures, tables, equations).
+    // Run transforms in order: number sections → cross-refs → table of contents.
     let ctx = docmux_core::TransformContext::default();
-    let crossref = CrossRefTransform::new();
-    let _ = crossref.transform(&mut doc, &ctx);
+    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
+    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    let _ = TocTransform::new().transform(&mut doc, &ctx);
 
     let opts = WriteOptions {
         standalone,

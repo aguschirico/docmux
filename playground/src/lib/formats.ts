@@ -10,6 +10,7 @@ const EXTENSION_TO_FORMAT: Record<string, string> = {
   xml: "xml",
   yaml: "yaml",
   yml: "yaml",
+  myst: "myst",
   bib: "bibtex",
 };
 
@@ -28,6 +29,7 @@ const EXTENSION_TO_MONACO: Record<string, string> = {
   css: "css",
   js: "javascript",
   ts: "typescript",
+  myst: "markdown",
   bib: "plaintext",
 };
 
