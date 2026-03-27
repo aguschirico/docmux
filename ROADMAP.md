@@ -74,7 +74,7 @@
 - [x] `--eol=crlf|lf|native`
 - [ ] `--template=FILE` with template engine
 - [ ] `--bibliography=FILE`, `--csl=FILE`
-- [ ] `--highlight-style=STYLE`
+- [x] `--highlight-style=STYLE`, `--list-highlight-themes`, `--list-highlight-languages`
 - [ ] `--section-divs`, `--id-prefix=PREFIX`
 
 ### Pandoc parity — Extensions (markdown reader)
@@ -97,7 +97,7 @@
 
 - [x] `docmux-writer-markdown` — CommonMark/GFM roundtrip, normalization (28 tests)
 - [x] `docmux-writer-plaintext` — stripped text output (29 tests)
-- [ ] HTML reader — web content, HTML→LaTeX
+- [x] `docmux-reader-html` — HTML reader with scraper/html5ever (29 tests)
 - [ ] DOCX writer — OOXML output via zip + XML generation
 
 ### Template system
@@ -107,7 +107,7 @@
 
 ### Syntax highlighting
 
-- [ ] Server-side highlighting via `syntect` or `tree-sitter-highlight`
+- [x] `docmux-highlight` — server-side highlighting via `syntect` (8 tests), integrated in HTML and LaTeX writers
 - [ ] Line numbers, multiple styles
 
 ### Packaging

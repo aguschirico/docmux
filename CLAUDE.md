@@ -6,7 +6,7 @@ A universal document converter written in Rust. Architecture: **Reader → AST �
 
 ## Architecture decisions (already made)
 
-- **Workspace layout**: 19 crates under `crates/`. Each reader/writer/transform is a separate crate for independent compilation and optional features.
+- **Workspace layout**: 21 crates under `crates/`. Each reader/writer/transform is a separate crate for independent compilation and optional features.
 - **AST design**: Rich typed nodes (13+ block types, 16+ inline types) — math, citations, cross-refs, admonitions, divs, underline are first-class. All strings are owned (`String`), no lifetimes in the public API.
 - **Comrak for Markdown**: Using comrak with GFM extensions (tables, tasklists, footnotes, math_dollars, description_lists, front_matter_delimiter, subscript, superscript).
 - **YAML frontmatter**: Two-pass parsing — first to `serde_yaml::Value` (captures everything), then extract known fields (`title`, `author`, `date`, `abstract`, `keywords`) into typed `Metadata` fields, rest goes to `custom: HashMap<String, MetaValue>`.
@@ -56,15 +56,16 @@ Git pre-commit hook in `.githooks/pre-commit` (configured via `core.hooksPath`).
 
 See `ROADMAP.md` for full status. **Phase 1 ✅ · Phase 2 ✅ · Phase 3 in progress.**
 
-### Crates (19 total, 236+ tests)
+### Crates (21 total, 290+ tests)
 
 | Category | Crates |
 |----------|--------|
 | Core | `docmux-ast`, `docmux-core` |
-| Readers | `docmux-reader-markdown` (15), `docmux-reader-latex` (53), `docmux-reader-typst` (81), `docmux-reader-myst` (15) |
-| Writers | `docmux-writer-html` (6), `docmux-writer-latex` (10), `docmux-writer-typst` (16), `docmux-writer-markdown` (28), `docmux-writer-plaintext` (29), `docmux-writer-docx` |
+| Readers | `docmux-reader-markdown` (15), `docmux-reader-latex` (53), `docmux-reader-typst` (81), `docmux-reader-myst` (15), `docmux-reader-html` (29) |
+| Writers | `docmux-writer-html` (8), `docmux-writer-latex` (12), `docmux-writer-typst` (16), `docmux-writer-markdown` (28), `docmux-writer-plaintext` (29), `docmux-writer-docx` |
 | Transforms | `docmux-transform-crossref` (7), `docmux-transform-toc` (6), `docmux-transform-number-sections` (7), `docmux-transform-cite`, `docmux-transform-math` |
-| Integration | `docmux-cli` (13 tests), `docmux-wasm` |
+| Highlight | `docmux-highlight` (8) |
+| Integration | `docmux-cli` (20 tests), `docmux-wasm` |
 
 ### Playground app
 
