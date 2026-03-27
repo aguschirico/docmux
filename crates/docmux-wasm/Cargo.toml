@@ -19,6 +19,8 @@ docmux-reader-markdown = { workspace = true }
 docmux-reader-latex = { workspace = true }
 docmux-reader-typst = { workspace = true }
 docmux-reader-myst = { workspace = true }
+docmux-reader-html = { workspace = true }
+docmux-highlight = { workspace = true }
 
 # Writers
 docmux-writer-html = { workspace = true }

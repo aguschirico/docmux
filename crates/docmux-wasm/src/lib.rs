@@ -4,6 +4,7 @@
 //! to JavaScript/TypeScript via wasm-bindgen.
 
 use docmux_core::{Registry, Transform, WriteOptions};
+use docmux_reader_html::HtmlReader;
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
@@ -25,6 +26,7 @@ fn build_registry() -> Registry {
     reg.add_reader(Box::new(LatexReader::new()));
     reg.add_reader(Box::new(TypstReader::new()));
     reg.add_reader(Box::new(MystReader::new()));
+    reg.add_reader(Box::new(HtmlReader::new()));
 
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
@@ -75,7 +77,12 @@ fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<
 
     let opts = WriteOptions {
         standalone,
-        ..WriteOptions::default()
+        highlight_style: if to == "html" {
+            Some("InspiredGitHub".into())
+        } else {
+            None
+        },
+        ..Default::default()
     };
     writer
         .write(&doc, &opts)
