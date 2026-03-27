@@ -20,11 +20,13 @@
 //! This overwrites all `.html` files. Review the diff with `git diff` before committing.
 
 use docmux_core::{Reader, WriteOptions, Writer};
+use docmux_reader_html::HtmlReader;
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_typst::TypstReader;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
+use docmux_writer_markdown::MarkdownWriter;
 use docmux_writer_typst::TypstWriter;
 use std::path::{Path, PathBuf};
 
@@ -614,6 +616,116 @@ fn golden_typ_to_typst() {
     if !failures.is_empty() {
         panic!(
             "\n\n{count} .typ→.typ golden file(s) mismatched:\n\n{details}",
+            count = failures.len(),
+            details = failures.join("\n"),
+        );
+    }
+}
+
+// ─── HTML → Markdown golden tests ───────────────────────────────────────────
+
+fn convert_html_to_md(input: &str) -> String {
+    let reader = HtmlReader::new();
+    let writer = MarkdownWriter::new();
+    let opts = WriteOptions::default();
+    let doc = reader
+        .read(input)
+        .expect("html reader should not fail on fixture");
+    writer
+        .write(&doc, &opts)
+        .expect("markdown writer should not fail")
+}
+
+fn discover_html_fixtures(dir: &Path) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+    if !dir.is_dir() {
+        return results;
+    }
+    for entry in std::fs::read_dir(dir).expect("read fixtures dir") {
+        let entry = entry.expect("read dir entry");
+        let path = entry.path();
+        if path.is_dir() {
+            results.extend(discover_html_fixtures(&path));
+        } else if path.extension().is_some_and(|ext| ext == "html") {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            // Only match primary HTML fixture files — exclude derived expectation
+            // files (e.g., heading.html which is an MD→HTML expectation, or
+            // latex-code.tex.html). Primary HTML fixtures have stems without dots
+            // and don't duplicate an existing .md fixture name.
+            if !stem.contains('.') {
+                // Check that there is no corresponding .md file (which would mean
+                // this .html is an expectation for an MD→HTML golden test).
+                let md_sibling = path.with_extension("md");
+                if !md_sibling.exists() {
+                    results.push(path);
+                }
+            }
+        }
+    }
+    results.sort();
+    results
+}
+
+#[test]
+fn golden_html_to_md() {
+    let base = fixtures_dir();
+    let fixtures = discover_html_fixtures(&base);
+
+    if fixtures.is_empty() {
+        eprintln!("No .html fixtures found (skipping golden_html_to_md)");
+        return;
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut generated = 0u32;
+    let mut updated = 0u32;
+
+    for fixture_path in &fixtures {
+        let name = test_name(fixture_path, &base);
+        let expected_path = fixture_path.with_extension("html.md");
+
+        let input = std::fs::read_to_string(fixture_path)
+            .unwrap_or_else(|e| panic!("[{name}] failed to read input: {e}"));
+        let actual = convert_html_to_md(&input);
+
+        if update_mode() {
+            std::fs::write(&expected_path, &actual)
+                .unwrap_or_else(|e| panic!("[{name}] failed to write expected: {e}"));
+            updated += 1;
+            eprintln!("  updated: {name}.html.md");
+            continue;
+        }
+
+        if !expected_path.exists() {
+            std::fs::write(&expected_path, &actual)
+                .unwrap_or_else(|e| panic!("[{name}] failed to write expected: {e}"));
+            generated += 1;
+            eprintln!("  generated: {name}.html.md (new — review the file)");
+            continue;
+        }
+
+        let expected = std::fs::read_to_string(&expected_path)
+            .unwrap_or_else(|e| panic!("[{name}] failed to read expected: {e}"));
+
+        if actual != expected {
+            failures.push(format!(
+                "━━━ MISMATCH: {name}.html.md ━━━\n--- expected ({path})\n+++ actual\n\n{diff}\nHint: run `DOCMUX_UPDATE_EXPECTATIONS=1 cargo test -p docmux-cli --test golden` to update.\n",
+                path = expected_path.display(),
+                diff = line_diff(&expected, &actual),
+            ));
+        }
+    }
+
+    if generated > 0 {
+        eprintln!("\n  {} new .html.md expectation(s) generated.", generated);
+    }
+    if updated > 0 {
+        eprintln!("\n  {} .html.md expectation(s) updated.", updated);
+    }
+
+    if !failures.is_empty() {
+        panic!(
+            "\n\n{count} .html→.md golden file(s) mismatched:\n\n{details}",
             count = failures.len(),
             details = failures.join("\n"),
         );
