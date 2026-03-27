@@ -2,13 +2,20 @@
 set -uo pipefail
 
 # ─── docmux quality gate (Claude Code Stop hook) ────────────────────
-# Two phases:
-#   Phase 1 — Code review: Injects quality checklist. Claude reviews
-#             its own changes for DRY, dead code, simplicity, etc.
-#             Fires once per unique change set (tracked via diff hash).
-#   Phase 2 — Mechanical checks: cargo fmt, clippy, test, tsc, eslint.
-#             Runs every time after the review phase has been done.
+# Reads JSON from stdin. Uses stop_hook_active to prevent infinite loops.
+# Outputs JSON to stdout with {"decision":"block","reason":"..."} to block.
+# Exit 0 with no JSON = allow Claude to stop.
 # ─────────────────────────────────────────────────────────────────────
+
+# Read hook input from stdin
+INPUT=$(cat)
+
+# CRITICAL: Break infinite loop — if Claude is already continuing from
+# a previous stop hook, allow it to stop this time.
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
+    exit 0
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$REPO_ROOT"
@@ -17,7 +24,7 @@ cd "$REPO_ROOT"
 RUST_CHANGED=$(git diff --name-only HEAD -- '*.rs' 2>/dev/null; git ls-files --others --exclude-standard -- '*.rs' 2>/dev/null)
 TS_CHANGED=$(git diff --name-only HEAD -- 'playground/*.ts' 'playground/*.tsx' 2>/dev/null; git ls-files --others --exclude-standard -- 'playground/*.ts' 'playground/*.tsx' 2>/dev/null)
 
-# Fast path: no code changes → exit immediately
+# No code changes → allow stop
 if [ -z "$RUST_CHANGED" ] && [ -z "$TS_CHANGED" ]; then
     exit 0
 fi
@@ -28,11 +35,17 @@ MARKER="/tmp/docmux-qg-${DIFF_HASH}"
 
 if [ ! -f "$MARKER" ]; then
     touch "$MARKER"
-    cat "$REPO_ROOT/.claude/hooks/quality-review.md"
-    exit 2
+    REVIEW=$(cat "$REPO_ROOT/.claude/hooks/quality-review.md")
+    jq -n --arg reason "$REVIEW" '{"decision":"block","reason":$reason}'
+    exit 0
 fi
 
-# ─── Phase 2: Mechanical checks (after review is done) ──────────────
+# ─── Phase 2: Mechanical checks (once per change set, after review) ──
+MECH_MARKER="/tmp/docmux-qg-mech-${DIFF_HASH}"
+if [ -f "$MECH_MARKER" ]; then
+    exit 0
+fi
+
 FAILURES=""
 
 if [ -n "$RUST_CHANGED" ]; then
@@ -57,12 +70,12 @@ if [ -n "$TS_CHANGED" ]; then
 fi
 
 if [ -n "$FAILURES" ]; then
-    echo "MECHANICAL CHECKS FAILED — fix before completing:"
-    echo -e "$FAILURES"
-    echo "Run the failing commands, fix the issues, then try again."
-    # Clear the review marker so the review re-runs after fixes
-    rm -f "$MARKER"
-    exit 2
+    REASON=$(printf "MECHANICAL CHECKS FAILED — fix before completing:\n%b\nRun the failing commands, fix the issues, then try again." "$FAILURES")
+    rm -f "$MARKER" "$MECH_MARKER"
+    jq -n --arg reason "$REASON" '{"decision":"block","reason":$reason}'
+    exit 0
 fi
 
+# All checks passed
+touch "$MECH_MARKER"
 exit 0

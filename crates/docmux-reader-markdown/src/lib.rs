@@ -37,6 +37,7 @@ impl MarkdownReader {
         opts.extension.math_code = true;
         opts.extension.front_matter_delimiter = Some("---".into());
         opts.extension.subscript = true;
+        opts.extension.superscript = true;
         // Parse options
         opts.parse.smart = true;
         opts
@@ -279,6 +280,39 @@ impl MarkdownReader {
                         }],
                     })
                 }
+            }
+            NodeValue::DescriptionList => {
+                let items: Vec<DefinitionItem> = node
+                    .children()
+                    .filter_map(|item_node| {
+                        let item_ast = item_node.data.borrow();
+                        if !matches!(item_ast.value, NodeValue::DescriptionItem(_)) {
+                            return None;
+                        }
+                        drop(item_ast);
+
+                        let mut term = Vec::new();
+                        let mut definitions = Vec::new();
+
+                        for child in item_node.children() {
+                            let child_ast = child.data.borrow();
+                            match &child_ast.value {
+                                NodeValue::DescriptionTerm => {
+                                    drop(child_ast);
+                                    term = self.collect_inlines(child);
+                                }
+                                NodeValue::DescriptionDetails => {
+                                    drop(child_ast);
+                                    definitions.push(self.convert_node(child));
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        Some(DefinitionItem { term, definitions })
+                    })
+                    .collect();
+                Some(Block::DefinitionList { items })
             }
             _ => {
                 // Skip unknown node types for now
@@ -1479,6 +1513,70 @@ mod tests {
             assert!(matches!(&content[2], Inline::Text { value } if value == "O"));
         } else {
             panic!("Expected Paragraph");
+        }
+    }
+
+    // ─── Superscript tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn superscript_caret_syntax() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("x^2^").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            // Expect: Text("x"), Superscript([Text("2")])
+            assert_eq!(content.len(), 2, "Expected 2 inlines, got: {:#?}", content);
+            assert!(matches!(&content[0], Inline::Text { value } if value == "x"));
+            match &content[1] {
+                Inline::Superscript { content: sup } => {
+                    assert_eq!(sup.len(), 1);
+                    assert!(matches!(&sup[0], Inline::Text { value } if value == "2"));
+                }
+                other => panic!("Expected Superscript, got {:?}", other),
+            }
+        } else {
+            panic!("Expected Paragraph");
+        }
+    }
+
+    // ─── Description list tests ──────────────────────────────────────────────
+
+    #[test]
+    fn description_list_basic() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("Term\n: Definition here").unwrap();
+        let dl = doc
+            .content
+            .iter()
+            .find(|b| matches!(b, Block::DefinitionList { .. }));
+        assert!(
+            dl.is_some(),
+            "Expected DefinitionList, got: {:#?}",
+            doc.content
+        );
+        if let Block::DefinitionList { items } = dl.unwrap() {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].term.len(), 1);
+            assert!(matches!(&items[0].term[0], Inline::Text { value } if value == "Term"));
+            assert_eq!(items[0].definitions.len(), 1);
+        }
+    }
+
+    #[test]
+    fn description_list_multiple_items() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("Apple\n: A fruit\n\nDog\n: An animal").unwrap();
+        let dl = doc
+            .content
+            .iter()
+            .find(|b| matches!(b, Block::DefinitionList { .. }));
+        assert!(
+            dl.is_some(),
+            "Expected DefinitionList, got: {:#?}",
+            doc.content
+        );
+        if let Block::DefinitionList { items } = dl.unwrap() {
+            assert_eq!(items.len(), 2, "Expected 2 items, got: {:#?}", items);
         }
     }
 
