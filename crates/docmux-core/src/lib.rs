@@ -113,6 +113,9 @@ pub struct WriteOptions {
     pub columns: usize,
     /// Line ending style for the output.
     pub eol: Eol,
+    /// Syntax highlighting theme name (e.g. `"InspiredGitHub"`).
+    /// `None` disables highlighting.
+    pub highlight_style: Option<String>,
 }
 
 impl Default for WriteOptions {
@@ -126,6 +129,7 @@ impl Default for WriteOptions {
             wrap: WrapMode::default(),
             columns: 72,
             eol: Eol::default(),
+            highlight_style: None,
         }
     }
 }
