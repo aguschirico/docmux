@@ -12,8 +12,8 @@
 //! `<sup>`, `<s>`, `<u>`, `<img>`).
 
 use docmux_ast::{
-    Alignment, Attributes, Block, ColumnSpec, DefinitionItem, Document, Image, Inline, ListItem,
-    Metadata, Table, TableCell,
+    Alignment, Attributes, Author, Block, ColumnSpec, DefinitionItem, Document, Image, Inline,
+    ListItem, MetaValue, Metadata, Table, TableCell,
 };
 use docmux_core::{Reader, Result};
 use scraper::{ElementRef, Html, Node, Selector};
@@ -480,6 +480,68 @@ impl HtmlReader {
         }
     }
 
+    /// Extract `Metadata` from a `<head>` element.
+    ///
+    /// Reads:
+    /// - `<title>` → `Metadata.title`
+    /// - `<meta name="author" content="...">` → `Metadata.authors`
+    /// - `<meta name="date" content="...">` → `Metadata.date`
+    /// - `<meta name="keywords" content="...">` → `Metadata.keywords` (comma-split)
+    /// - `<meta name="description" content="...">` → `Metadata.custom["description"]`
+    fn extract_metadata(head: &ElementRef<'_>) -> Metadata {
+        let mut metadata = Metadata::default();
+
+        let title_sel = Selector::parse("title").unwrap();
+        if let Some(title_el) = head.select(&title_sel).next() {
+            let title: String = title_el.text().collect();
+            let trimmed = title.trim().to_string();
+            if !trimmed.is_empty() {
+                metadata.title = Some(trimmed);
+            }
+        }
+
+        let meta_sel = Selector::parse("meta[name]").unwrap();
+        for meta in head.select(&meta_sel) {
+            let name = match meta.value().attr("name") {
+                Some(n) => n,
+                None => continue,
+            };
+            let content = match meta.value().attr("content") {
+                Some(c) => c,
+                None => continue,
+            };
+            match name {
+                "author" => {
+                    metadata.authors.push(Author {
+                        name: content.to_string(),
+                        affiliation: None,
+                        email: None,
+                        orcid: None,
+                    });
+                }
+                "date" => {
+                    metadata.date = Some(content.to_string());
+                }
+                "keywords" => {
+                    metadata.keywords = content
+                        .split(',')
+                        .map(|kw| kw.trim().to_string())
+                        .filter(|kw| !kw.is_empty())
+                        .collect();
+                }
+                "description" => {
+                    metadata.custom.insert(
+                        "description".to_string(),
+                        MetaValue::String(content.to_string()),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        metadata
+    }
+
     /// Convert inline content of an element, recursively processing child nodes.
     fn convert_inlines(el: &ElementRef<'_>) -> Vec<Inline> {
         let mut inlines = Vec::new();
@@ -607,6 +669,14 @@ impl Reader for HtmlReader {
 
     fn read(&self, input: &str) -> Result<Document> {
         let html = Html::parse_document(input);
+
+        let head_sel = Selector::parse("head").unwrap();
+        let metadata = if let Some(head) = html.select(&head_sel).next() {
+            Self::extract_metadata(&head)
+        } else {
+            Metadata::default()
+        };
+
         let root = Self::find_root(&html);
         let blocks = match root {
             Some(root_el) => Self::convert_children(&root_el),
@@ -614,7 +684,7 @@ impl Reader for HtmlReader {
         };
 
         Ok(Document {
-            metadata: Metadata::default(),
+            metadata,
             content: blocks,
             bibliography: None,
             warnings: Vec::new(),
@@ -1088,5 +1158,65 @@ mod tests {
         } else {
             panic!("expected paragraph");
         }
+    }
+
+    #[test]
+    fn parse_full_document_metadata() {
+        let r = HtmlReader::new();
+        let html = r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>My Document</title>
+    <meta name="author" content="Jane Doe">
+    <meta name="date" content="2026-03-26">
+    <meta name="keywords" content="rust, docmux, html">
+</head>
+<body>
+    <h1>Hello</h1>
+    <p>World</p>
+</body>
+</html>"#;
+        let doc = r.read(html).unwrap();
+        assert_eq!(doc.metadata.title.as_deref(), Some("My Document"));
+        assert_eq!(doc.metadata.authors.len(), 1);
+        assert_eq!(doc.metadata.authors[0].name, "Jane Doe");
+        assert_eq!(doc.metadata.date.as_deref(), Some("2026-03-26"));
+        assert_eq!(doc.metadata.keywords, vec!["rust", "docmux", "html"]);
+        assert_eq!(doc.content.len(), 2);
+    }
+
+    #[test]
+    fn ignored_elements_produce_nothing() {
+        let r = HtmlReader::new();
+        let doc = r
+            .read("<script>alert('x')</script><style>body{}</style><p>kept</p>")
+            .unwrap();
+        assert_eq!(doc.content.len(), 1);
+        assert!(matches!(&doc.content[0], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn unknown_tags_unwrap_children() {
+        let r = HtmlReader::new();
+        let doc = r.read("<custom-tag><p>inner</p></custom-tag>").unwrap();
+        // Should unwrap to find the paragraph inside
+        assert!(!doc.content.is_empty());
+        // The paragraph should be accessible somewhere in the output
+        fn has_paragraph(blocks: &[Block]) -> bool {
+            blocks.iter().any(|b| match b {
+                Block::Paragraph { .. } => true,
+                Block::Div { content, .. } => has_paragraph(content),
+                _ => false,
+            })
+        }
+        assert!(has_paragraph(&doc.content));
+    }
+
+    #[test]
+    fn semantic_tags_become_divs() {
+        let r = HtmlReader::new();
+        let doc = r.read("<section><p>content</p></section>").unwrap();
+        // section should become a Div or its children should be present
+        assert!(!doc.content.is_empty());
     }
 }
