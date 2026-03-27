@@ -42,16 +42,56 @@ impl HtmlWriter {
             Block::CodeBlock {
                 language, content, ..
             } => {
-                if let Some(lang) = language {
+                if let (Some(lang), Some(theme)) =
+                    (language.as_deref(), opts.highlight_style.as_deref())
+                {
+                    if let Ok(lines) = docmux_highlight::highlight(content, lang, theme) {
+                        out.push_str(&format!(
+                            "<pre><code class=\"language-{}\">",
+                            escape_html(lang)
+                        ));
+                        for line in &lines {
+                            for token in line {
+                                let c = token.style.foreground;
+                                let mut style = format!("color:#{:02x}{:02x}{:02x}", c.r, c.g, c.b);
+                                if token.style.bold {
+                                    style.push_str(";font-weight:bold");
+                                }
+                                if token.style.italic {
+                                    style.push_str(";font-style:italic");
+                                }
+                                if token.style.underline {
+                                    style.push_str(";text-decoration:underline");
+                                }
+                                out.push_str(&format!(
+                                    "<span style=\"{}\">{}</span>",
+                                    style,
+                                    escape_html(&token.text)
+                                ));
+                            }
+                        }
+                        out.push_str("</code></pre>\n");
+                    } else {
+                        // Highlight failed (unknown lang, etc.) — fall back to plain
+                        out.push_str(&format!(
+                            "<pre><code class=\"language-{}\">",
+                            escape_html(lang)
+                        ));
+                        out.push_str(&escape_html(content));
+                        out.push_str("</code></pre>\n");
+                    }
+                } else if let Some(lang) = language {
                     out.push_str(&format!(
                         "<pre><code class=\"language-{}\">",
                         escape_html(lang)
                     ));
+                    out.push_str(&escape_html(content));
+                    out.push_str("</code></pre>\n");
                 } else {
                     out.push_str("<pre><code>");
+                    out.push_str(&escape_html(content));
+                    out.push_str("</code></pre>\n");
                 }
-                out.push_str(&escape_html(content));
-                out.push_str("</code></pre>\n");
             }
             Block::MathBlock { content, label } => {
                 let class = match opts.math_engine {
@@ -632,5 +672,62 @@ mod tests {
         let writer = HtmlWriter::new();
         assert_eq!(writer.format(), "html");
         assert_eq!(writer.default_extension(), "html");
+    }
+
+    #[test]
+    fn code_block_with_highlighting() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("rust".into()),
+                content: "fn main() {}".into(),
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let writer = HtmlWriter::new();
+        let opts = WriteOptions {
+            highlight_style: Some("InspiredGitHub".into()),
+            ..Default::default()
+        };
+        let html = writer.write(&doc, &opts).unwrap();
+        assert!(
+            html.contains("<span style=\""),
+            "expected colored spans, got: {html}"
+        );
+        assert!(html.contains("fn"), "expected 'fn' in output, got: {html}");
+        assert!(
+            html.contains("<pre"),
+            "expected <pre in output, got: {html}"
+        );
+    }
+
+    #[test]
+    fn code_block_highlighting_unknown_lang_falls_back() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("nonexistent-xyz".into()),
+                content: "some code".into(),
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let writer = HtmlWriter::new();
+        let opts = WriteOptions {
+            highlight_style: Some("InspiredGitHub".into()),
+            ..Default::default()
+        };
+        let html = writer.write(&doc, &opts).unwrap();
+        assert!(
+            html.contains("some code"),
+            "expected 'some code' in output, got: {html}"
+        );
+        assert!(
+            html.contains("<pre><code"),
+            "expected plain fallback with <pre><code, got: {html}"
+        );
     }
 }
