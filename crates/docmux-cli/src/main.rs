@@ -5,6 +5,7 @@
 use clap::Parser;
 use docmux_ast::{Block, Metadata};
 use docmux_core::{Eol, MathEngine, Registry, Transform, TransformContext, WrapMode, WriteOptions};
+use docmux_reader_html::HtmlReader;
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
@@ -28,7 +29,7 @@ use std::path::PathBuf;
 )]
 struct Cli {
     /// Input file(s). Use `-` for stdin.
-    #[arg(required_unless_present_any = ["list_input_formats", "list_output_formats"])]
+    #[arg(required_unless_present_any = ["list_input_formats", "list_output_formats", "list_highlight_themes", "list_highlight_languages"])]
     input: Vec<PathBuf>,
 
     /// Output file path (use `-` for stdout)
@@ -111,6 +112,18 @@ struct Cli {
     /// Suppress all non-error output on stderr
     #[arg(long, short = 'q', conflicts_with = "verbose")]
     quiet: bool,
+
+    /// Syntax highlighting theme for code blocks (e.g. "InspiredGitHub")
+    #[arg(long, value_name = "STYLE")]
+    highlight_style: Option<String>,
+
+    /// List available syntax highlighting themes and exit
+    #[arg(long)]
+    list_highlight_themes: bool,
+
+    /// List available syntax highlighting languages and exit
+    #[arg(long)]
+    list_highlight_languages: bool,
 }
 
 fn build_registry() -> Registry {
@@ -119,6 +132,7 @@ fn build_registry() -> Registry {
     reg.add_reader(Box::new(LatexReader::new()));
     reg.add_reader(Box::new(MystReader::new()));
     reg.add_reader(Box::new(TypstReader::new()));
+    reg.add_reader(Box::new(HtmlReader::new()));
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
     reg.add_writer(Box::new(MarkdownWriter::new()));
@@ -144,6 +158,18 @@ fn main() {
             println!("{fmt}");
         }
         println!("json");
+        return;
+    }
+    if cli.list_highlight_themes {
+        for theme in docmux_highlight::available_themes() {
+            println!("{theme}");
+        }
+        return;
+    }
+    if cli.list_highlight_languages {
+        for lang in docmux_highlight::available_languages() {
+            println!("{lang}");
+        }
         return;
     }
 
@@ -322,6 +348,7 @@ fn main() {
         wrap,
         columns: cli.columns,
         eol,
+        highlight_style: cli.highlight_style.clone(),
         ..Default::default()
     };
 
