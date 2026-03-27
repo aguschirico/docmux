@@ -5,6 +5,7 @@
 
 use docmux_ast::*;
 use docmux_core::{MathEngine, Result, WriteOptions, Writer};
+use docmux_highlight::HighlightToken;
 
 /// A LaTeX writer.
 #[derive(Debug, Default)]
@@ -49,17 +50,18 @@ impl LatexWriter {
             Block::CodeBlock {
                 language, content, ..
             } => {
-                if let Some(lang) = language {
-                    out.push_str(&format!("\\begin{{lstlisting}}[language={}]\n", lang));
+                if let (Some(lang), Some(theme)) =
+                    (language.as_deref(), opts.highlight_style.as_deref())
+                {
+                    if let Ok(lines) = docmux_highlight::highlight(content, lang, theme) {
+                        write_highlighted_code(&lines, out);
+                    } else {
+                        // Highlight failed — fall back to lstlisting
+                        write_lstlisting(language.as_deref(), content, out);
+                    }
                 } else {
-                    out.push_str("\\begin{lstlisting}\n");
+                    write_lstlisting(language.as_deref(), content, out);
                 }
-                // Code blocks are verbatim — no escaping
-                out.push_str(content);
-                if !content.ends_with('\n') {
-                    out.push('\n');
-                }
-                out.push_str("\\end{lstlisting}\n");
             }
             Block::MathBlock { content, label } => {
                 if let Some(label) = label {
@@ -449,6 +451,8 @@ impl LatexWriter {
         preamble.push_str("\\usepackage{graphicx}\n");
         preamble.push_str("\\usepackage{hyperref}\n");
         preamble.push_str("\\usepackage{listings}\n");
+        preamble.push_str("\\usepackage{alltt}\n");
+        preamble.push_str("\\usepackage{xcolor}\n");
         preamble.push_str("\\usepackage[normalem]{ulem}\n"); // for \sout (strikethrough)
 
         if let Some(title) = &doc.metadata.title {
@@ -517,6 +521,60 @@ impl Writer for LatexWriter {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Write a code block using `\begin{lstlisting}...\end{lstlisting}`.
+fn write_lstlisting(language: Option<&str>, content: &str, out: &mut String) {
+    if let Some(lang) = language {
+        out.push_str(&format!("\\begin{{lstlisting}}[language={}]\n", lang));
+    } else {
+        out.push_str("\\begin{lstlisting}\n");
+    }
+    // Code blocks are verbatim — no escaping
+    out.push_str(content);
+    if !content.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("\\end{lstlisting}\n");
+}
+
+/// Write syntax-highlighted code inside an `alltt` environment using
+/// `\textcolor[RGB]` commands for coloured tokens.
+fn write_highlighted_code(lines: &[Vec<HighlightToken>], out: &mut String) {
+    out.push_str("\\begin{alltt}\n");
+    for line in lines {
+        for token in line {
+            let escaped = latex_escape_verbatim(&token.text);
+            let c = token.style.foreground;
+            let mut inner = format!("\\textcolor[RGB]{{{},{},{}}}{{", c.r, c.g, c.b);
+            inner.push_str(&escaped);
+            inner.push('}');
+
+            if token.style.bold {
+                inner = format!("\\textbf{{{inner}}}");
+            }
+            if token.style.italic {
+                inner = format!("\\textit{{{inner}}}");
+            }
+            out.push_str(&inner);
+        }
+    }
+    out.push_str("\\end{alltt}\n");
+}
+
+/// Escape characters that are special inside the `alltt` environment.
+/// Only `\`, `{`, and `}` need escaping in alltt.
+fn latex_escape_verbatim(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\textbackslash{}"),
+            '{' => out.push_str("\\{"),
+            '}' => out.push_str("\\}"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
 
 /// Escape LaTeX special characters: # $ % & ~ _ ^ \ { }
 fn escape_latex(s: &str) -> String {
@@ -726,5 +784,57 @@ mod tests {
         let writer = LatexWriter::new();
         assert_eq!(writer.format(), "latex");
         assert_eq!(writer.default_extension(), "tex");
+    }
+
+    #[test]
+    fn code_block_with_highlighting() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("rust".into()),
+                content: "fn main() {}".into(),
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let writer = LatexWriter::new();
+        let opts = WriteOptions {
+            highlight_style: Some("InspiredGitHub".into()),
+            ..Default::default()
+        };
+        let tex = writer.write(&doc, &opts).unwrap();
+        assert!(
+            tex.contains("\\textcolor[RGB]"),
+            "expected \\textcolor[RGB] in highlighted output, got: {tex}"
+        );
+        assert!(
+            !tex.contains("\\begin{lstlisting}"),
+            "should NOT fall back to lstlisting when highlighting succeeds"
+        );
+    }
+
+    #[test]
+    fn code_block_highlighting_fallback() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("nonexistent-xyz".into()),
+                content: "fn main() {}".into(),
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let writer = LatexWriter::new();
+        let opts = WriteOptions {
+            highlight_style: Some("InspiredGitHub".into()),
+            ..Default::default()
+        };
+        let tex = writer.write(&doc, &opts).unwrap();
+        assert!(
+            tex.contains("\\begin{lstlisting}"),
+            "expected lstlisting fallback for unknown language, got: {tex}"
+        );
     }
 }
