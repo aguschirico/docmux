@@ -4,7 +4,7 @@
 //! vectors — the text-based [`Writer::write`] method returns an error because
 //! DOCX is a binary (ZIP) format.
 
-use docmux_ast::Document;
+use docmux_ast::{Block, Document, Inline, QuoteType};
 use docmux_core::{ConvertError, Result, WriteOptions, Writer};
 use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
@@ -81,6 +81,171 @@ impl DocxBuilder {
             target: target.to_string(),
         });
         id
+    }
+
+    // ── Block / inline rendering ──────────────────────────────────────
+
+    fn write_blocks(&mut self, blocks: &[Block]) {
+        for block in blocks {
+            self.write_block(block);
+        }
+    }
+
+    #[allow(clippy::single_match)] // More arms added in later tasks
+    fn write_block(&mut self, block: &Block) {
+        match block {
+            Block::Paragraph { content } => {
+                self.body_xml.push_str("<w:p>");
+                self.write_inlines(content, &[]);
+                self.body_xml.push_str("</w:p>\n");
+            }
+            _ => {}
+        }
+    }
+
+    fn write_inlines(&mut self, inlines: &[Inline], run_props: &[&str]) {
+        for inline in inlines {
+            self.write_inline(inline, run_props);
+        }
+    }
+
+    fn write_inline(&mut self, inline: &Inline, run_props: &[&str]) {
+        match inline {
+            Inline::Text { value } => {
+                self.body_xml.push_str("<w:r>");
+                self.write_run_props(run_props);
+                let needs_preserve = value.starts_with(' ') || value.ends_with(' ');
+                if needs_preserve {
+                    self.body_xml.push_str("<w:t xml:space=\"preserve\">");
+                } else {
+                    self.body_xml.push_str("<w:t>");
+                }
+                self.body_xml.push_str(&xml_escape(value));
+                self.body_xml.push_str("</w:t></w:r>");
+            }
+            Inline::Strong { content } => {
+                let mut props: Vec<&str> = run_props.to_vec();
+                props.push("<w:b/>");
+                self.write_inlines(content, &props);
+            }
+            Inline::Emphasis { content } => {
+                let mut props: Vec<&str> = run_props.to_vec();
+                props.push("<w:i/>");
+                self.write_inlines(content, &props);
+            }
+            Inline::Strikethrough { content } => {
+                let mut props: Vec<&str> = run_props.to_vec();
+                props.push("<w:strike/>");
+                self.write_inlines(content, &props);
+            }
+            Inline::Underline { content } => {
+                let mut props: Vec<&str> = run_props.to_vec();
+                props.push("<w:u w:val=\"single\"/>");
+                self.write_inlines(content, &props);
+            }
+            Inline::Superscript { content } => {
+                let mut props: Vec<&str> = run_props.to_vec();
+                props.push("<w:vertAlign w:val=\"superscript\"/>");
+                self.write_inlines(content, &props);
+            }
+            Inline::Subscript { content } => {
+                let mut props: Vec<&str> = run_props.to_vec();
+                props.push("<w:vertAlign w:val=\"subscript\"/>");
+                self.write_inlines(content, &props);
+            }
+            Inline::SmallCaps { content } => {
+                let mut props: Vec<&str> = run_props.to_vec();
+                props.push("<w:smallCaps/>");
+                self.write_inlines(content, &props);
+            }
+            Inline::Code { value, .. } => {
+                self.body_xml.push_str("<w:r><w:rPr>");
+                for prop in run_props {
+                    self.body_xml.push_str(prop);
+                }
+                self.body_xml
+                    .push_str("<w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\"/>");
+                self.body_xml.push_str("<w:sz w:val=\"20\"/>");
+                self.body_xml.push_str("</w:rPr><w:t>");
+                self.body_xml.push_str(&xml_escape(value));
+                self.body_xml.push_str("</w:t></w:r>");
+            }
+            Inline::MathInline { value } => {
+                self.body_xml.push_str("<w:r>");
+                self.write_run_props(run_props);
+                self.body_xml.push_str("<w:t>");
+                self.body_xml.push_str(&xml_escape(value));
+                self.body_xml.push_str("</w:t></w:r>");
+            }
+            Inline::SoftBreak => {
+                self.body_xml
+                    .push_str("<w:r><w:t xml:space=\"preserve\"> </w:t></w:r>");
+            }
+            Inline::HardBreak => {
+                self.body_xml.push_str("<w:r><w:br/></w:r>");
+            }
+            Inline::Quoted {
+                quote_type,
+                content,
+            } => {
+                let (open, close) = match quote_type {
+                    QuoteType::SingleQuote => ("\u{2018}", "\u{2019}"),
+                    QuoteType::DoubleQuote => ("\u{201C}", "\u{201D}"),
+                };
+                // Opening quote
+                self.body_xml.push_str("<w:r>");
+                self.write_run_props(run_props);
+                self.body_xml.push_str("<w:t>");
+                self.body_xml.push_str(open);
+                self.body_xml.push_str("</w:t></w:r>");
+                // Content
+                self.write_inlines(content, run_props);
+                // Closing quote
+                self.body_xml.push_str("<w:r>");
+                self.write_run_props(run_props);
+                self.body_xml.push_str("<w:t>");
+                self.body_xml.push_str(close);
+                self.body_xml.push_str("</w:t></w:r>");
+            }
+            Inline::Span { content, .. } => {
+                self.write_inlines(content, run_props);
+            }
+            Inline::RawInline { format, content } => {
+                if format == "docx" || format == "openxml" {
+                    self.body_xml.push_str(content);
+                }
+                // Skip other formats
+            }
+            Inline::Citation(citation) => {
+                let keys: Vec<&str> = citation.items.iter().map(|i| i.key.as_str()).collect();
+                let text = format!("[{}]", keys.join("; "));
+                self.body_xml.push_str("<w:r>");
+                self.write_run_props(run_props);
+                self.body_xml.push_str("<w:t>");
+                self.body_xml.push_str(&xml_escape(&text));
+                self.body_xml.push_str("</w:t></w:r>");
+            }
+            Inline::CrossRef(cross_ref) => {
+                self.body_xml.push_str("<w:r>");
+                self.write_run_props(run_props);
+                self.body_xml.push_str("<w:t>");
+                self.body_xml.push_str(&xml_escape(&cross_ref.target));
+                self.body_xml.push_str("</w:t></w:r>");
+            }
+            // Skip for now (handled in later tasks)
+            Inline::FootnoteRef { .. } | Inline::Link { .. } | Inline::Image(_) => {}
+        }
+    }
+
+    /// Write `<w:rPr>…</w:rPr>` if there are any run properties.
+    fn write_run_props(&mut self, run_props: &[&str]) {
+        if !run_props.is_empty() {
+            self.body_xml.push_str("<w:rPr>");
+            for prop in run_props {
+                self.body_xml.push_str(prop);
+            }
+            self.body_xml.push_str("</w:rPr>");
+        }
     }
 
     // ── Part builders ───────────────────────────────────────────────────
@@ -325,8 +490,9 @@ impl Writer for DocxWriter {
         ))
     }
 
-    fn write_bytes(&self, _doc: &Document, _opts: &WriteOptions) -> Result<Vec<u8>> {
-        let builder = DocxBuilder::new();
+    fn write_bytes(&self, doc: &Document, _opts: &WriteOptions) -> Result<Vec<u8>> {
+        let mut builder = DocxBuilder::new();
+        builder.write_blocks(&doc.content);
         builder.assemble_zip()
     }
 }
@@ -335,6 +501,65 @@ impl Writer for DocxWriter {
 mod tests {
     use super::*;
     use std::io::{Cursor, Read as _};
+
+    /// Extract word/document.xml from a DOCX byte buffer.
+    fn extract_document_xml(bytes: &[u8]) -> String {
+        let cursor = Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut file = archive.by_name("word/document.xml").unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+        contents
+    }
+
+    #[test]
+    fn paragraph_with_inlines() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Text {
+                        value: "Hello ".into(),
+                    },
+                    Inline::Strong {
+                        content: vec![Inline::Text {
+                            value: "bold".into(),
+                        }],
+                    },
+                    Inline::Text {
+                        value: " and ".into(),
+                    },
+                    Inline::Emphasis {
+                        content: vec![Inline::Text {
+                            value: "italic".into(),
+                        }],
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        assert!(
+            xml.contains("<w:t xml:space=\"preserve\">Hello </w:t>"),
+            "missing preserved-space text run, got:\n{xml}"
+        );
+        assert!(xml.contains("<w:b/>"), "missing bold run prop, got:\n{xml}");
+        assert!(
+            xml.contains("<w:t>bold</w:t>"),
+            "missing bold text, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:i/>"),
+            "missing italic run prop, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>italic</w:t>"),
+            "missing italic text, got:\n{xml}"
+        );
+    }
 
     #[test]
     fn trait_metadata() {
