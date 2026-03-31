@@ -91,7 +91,6 @@ impl DocxBuilder {
         }
     }
 
-    #[allow(clippy::single_match)] // More arms added in later tasks
     fn write_block(&mut self, block: &Block) {
         match block {
             Block::Paragraph { content } => {
@@ -99,8 +98,54 @@ impl DocxBuilder {
                 self.write_inlines(content, &[]);
                 self.body_xml.push_str("</w:p>\n");
             }
+            Block::Heading { level, content, .. } => {
+                let style = format!("Heading{}", level.min(&6));
+                self.body_xml.push_str("<w:p><w:pPr><w:pStyle w:val=\"");
+                self.body_xml.push_str(&style);
+                self.body_xml.push_str("\"/></w:pPr>");
+                self.write_inlines(content, &[]);
+                self.body_xml.push_str("</w:p>\n");
+            }
             _ => {}
         }
+    }
+
+    /// Render metadata (title, authors, date, abstract) as styled paragraphs
+    /// before the main body content.
+    fn write_metadata(&mut self, metadata: &docmux_ast::Metadata) {
+        if let Some(ref title) = metadata.title {
+            self.write_styled_paragraph("Title", title);
+        }
+        for author in &metadata.authors {
+            self.write_styled_paragraph("Author", &author.name);
+        }
+        if let Some(ref date) = metadata.date {
+            self.write_styled_paragraph("Date", date);
+        }
+        if let Some(ref abstract_blocks) = metadata.abstract_text {
+            // Render abstract blocks, overriding their paragraph style to "Abstract"
+            for block in abstract_blocks {
+                match block {
+                    Block::Paragraph { content } => {
+                        self.body_xml
+                            .push_str("<w:p><w:pPr><w:pStyle w:val=\"Abstract\"/></w:pPr>");
+                        self.write_inlines(content, &[]);
+                        self.body_xml.push_str("</w:p>\n");
+                    }
+                    other => self.write_block(other),
+                }
+            }
+        }
+    }
+
+    /// Write a single paragraph with a named style and plain text content.
+    fn write_styled_paragraph(&mut self, style: &str, text: &str) {
+        self.body_xml.push_str("<w:p><w:pPr><w:pStyle w:val=\"");
+        self.body_xml.push_str(style);
+        self.body_xml.push_str("\"/></w:pPr>");
+        self.body_xml.push_str("<w:r><w:t>");
+        self.body_xml.push_str(&xml_escape(text));
+        self.body_xml.push_str("</w:t></w:r></w:p>\n");
     }
 
     fn write_inlines(&mut self, inlines: &[Inline], run_props: &[&str]) {
@@ -492,6 +537,7 @@ impl Writer for DocxWriter {
 
     fn write_bytes(&self, doc: &Document, _opts: &WriteOptions) -> Result<Vec<u8>> {
         let mut builder = DocxBuilder::new();
+        builder.write_metadata(&doc.metadata);
         builder.write_blocks(&doc.content);
         builder.assemble_zip()
     }
@@ -670,6 +716,94 @@ mod tests {
         assert!(
             styles_xml.contains("w:styleId=\"Hyperlink\""),
             "styles.xml missing Hyperlink style"
+        );
+    }
+
+    #[test]
+    fn headings_use_heading_styles() {
+        use docmux_ast::{Block, Inline};
+        let doc = Document {
+            content: vec![
+                Block::Heading {
+                    level: 1,
+                    id: Some("intro".into()),
+                    content: vec![Inline::Text {
+                        value: "Introduction".into(),
+                    }],
+                    attrs: None,
+                },
+                Block::Heading {
+                    level: 2,
+                    id: None,
+                    content: vec![Inline::Text {
+                        value: "Sub".into(),
+                    }],
+                    attrs: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="Heading1"/>"#),
+            "missing Heading1 style, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Introduction</w:t>"),
+            "missing Introduction text, got:\n{xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="Heading2"/>"#),
+            "missing Heading2 style, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn metadata_renders_title_author_date() {
+        use docmux_ast::{Author, Metadata};
+        let doc = Document {
+            metadata: Metadata {
+                title: Some("My Paper".into()),
+                authors: vec![Author {
+                    name: "Jane Doe".into(),
+                    affiliation: Some("MIT".into()),
+                    email: None,
+                    orcid: None,
+                }],
+                date: Some("2026-01-01".into()),
+                ..Default::default()
+            },
+            content: vec![],
+            ..Default::default()
+        };
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="Title"/>"#),
+            "missing Title style, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>My Paper</w:t>"),
+            "missing title text, got:\n{xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="Author"/>"#),
+            "missing Author style, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Jane Doe</w:t>"),
+            "missing author text, got:\n{xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="Date"/>"#),
+            "missing Date style, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>2026-01-01</w:t>"),
+            "missing date text, got:\n{xml}"
         );
     }
 
