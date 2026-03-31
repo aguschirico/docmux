@@ -106,6 +106,51 @@ impl DocxBuilder {
                 self.write_inlines(content, &[]);
                 self.body_xml.push_str("</w:p>\n");
             }
+            Block::CodeBlock { content, .. } => {
+                for line in content.lines() {
+                    self.body_xml
+                        .push_str("<w:p><w:pPr><w:pStyle w:val=\"CodeBlock\"/></w:pPr>");
+                    self.body_xml.push_str("<w:r><w:t xml:space=\"preserve\">");
+                    self.body_xml.push_str(&xml_escape(line));
+                    self.body_xml.push_str("</w:t></w:r></w:p>\n");
+                }
+            }
+            Block::MathBlock { content, .. } => {
+                self.body_xml
+                    .push_str("<w:p><w:pPr><w:pStyle w:val=\"MathBlock\"/></w:pPr>");
+                self.body_xml.push_str("<w:r><w:t xml:space=\"preserve\">");
+                self.body_xml.push_str(&xml_escape(content));
+                self.body_xml.push_str("</w:t></w:r></w:p>\n");
+            }
+            Block::BlockQuote { content } => {
+                for child in content {
+                    match child {
+                        Block::Paragraph { content: inlines } => {
+                            self.body_xml
+                                .push_str("<w:p><w:pPr><w:pStyle w:val=\"BlockQuote\"/></w:pPr>");
+                            self.write_inlines(inlines, &[]);
+                            self.body_xml.push_str("</w:p>\n");
+                        }
+                        other => self.write_block(other),
+                    }
+                }
+            }
+            Block::ThematicBreak => {
+                self.body_xml.push_str(
+                    "<w:p><w:pPr><w:pBdr>\
+                     <w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/>\
+                     </w:pBdr></w:pPr></w:p>\n",
+                );
+            }
+            Block::RawBlock { format, content } => {
+                if format == "docx" || format == "openxml" {
+                    self.body_xml.push_str(content);
+                }
+                // Skip other formats
+            }
+            Block::Div { content, .. } => {
+                self.write_blocks(content);
+            }
             _ => {}
         }
     }
@@ -804,6 +849,97 @@ mod tests {
         assert!(
             xml.contains("<w:t>2026-01-01</w:t>"),
             "missing date text, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn code_block_uses_code_style() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("rust".into()),
+                content: "fn main() {}".into(),
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="CodeBlock"/>"#),
+            "missing CodeBlock style, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("fn main() {}"),
+            "missing code content, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn math_block_renders_plain_text() {
+        let doc = Document {
+            content: vec![Block::MathBlock {
+                content: "E = mc^2".into(),
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="MathBlock"/>"#),
+            "missing MathBlock style, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("E = mc^2"),
+            "missing math content, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn blockquote_uses_blockquote_style() {
+        let doc = Document {
+            content: vec![Block::BlockQuote {
+                content: vec![Block::Paragraph {
+                    content: vec![Inline::Text {
+                        value: "A quote".into(),
+                    }],
+                }],
+            }],
+            ..Default::default()
+        };
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+        assert!(
+            xml.contains(r#"<w:pStyle w:val="BlockQuote"/>"#),
+            "missing BlockQuote style, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>A quote</w:t>"),
+            "missing quote text, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn thematic_break_renders_border() {
+        let doc = Document {
+            content: vec![Block::ThematicBreak],
+            ..Default::default()
+        };
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+        assert!(
+            xml.contains("<w:pBdr>"),
+            "missing pBdr element, got:\n{xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:bottom w:val="single""#),
+            "missing bottom border, got:\n{xml}"
         );
     }
 
