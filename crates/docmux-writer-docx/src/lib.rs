@@ -4,8 +4,9 @@
 //! vectors — the text-based [`Writer::write`] method returns an error because
 //! DOCX is a binary (ZIP) format.
 
-use docmux_ast::{Block, Document, Inline, QuoteType};
+use docmux_ast::{Alignment, Block, Document, Inline, QuoteType};
 use docmux_core::{ConvertError, Result, WriteOptions, Writer};
+use std::fmt::Write as _;
 use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
@@ -151,6 +152,9 @@ impl DocxBuilder {
             Block::Div { content, .. } => {
                 self.write_blocks(content);
             }
+            Block::Table(table) => {
+                self.write_table(table);
+            }
             _ => {}
         }
     }
@@ -191,6 +195,112 @@ impl DocxBuilder {
         self.body_xml.push_str("<w:r><w:t>");
         self.body_xml.push_str(&xml_escape(text));
         self.body_xml.push_str("</w:t></w:r></w:p>\n");
+    }
+
+    fn write_table(&mut self, table: &docmux_ast::Table) {
+        // Caption before table
+        if let Some(caption) = &table.caption {
+            self.body_xml
+                .push_str("<w:p><w:pPr><w:pStyle w:val=\"Caption\"/></w:pPr>");
+            self.write_inlines(caption, &[]);
+            self.body_xml.push_str("</w:p>\n");
+        }
+
+        self.body_xml.push_str("<w:tbl>\n");
+
+        // Table properties: auto-width, grid borders
+        self.body_xml.push_str(
+            "<w:tblPr>\
+             <w:tblStyle w:val=\"TableGrid\"/>\
+             <w:tblW w:w=\"0\" w:type=\"auto\"/>\
+             <w:tblBorders>\
+             <w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
+             <w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
+             <w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
+             <w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
+             <w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
+             <w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
+             </w:tblBorders>\
+             <w:tblLook w:val=\"04A0\"/>\
+             </w:tblPr>\n",
+        );
+
+        // Grid columns
+        self.body_xml.push_str("<w:tblGrid>");
+        for _ in &table.columns {
+            self.body_xml.push_str("<w:gridCol/>");
+        }
+        self.body_xml.push_str("</w:tblGrid>\n");
+
+        // Header row
+        if let Some(header) = &table.header {
+            self.write_table_row(header, &table.columns, true);
+        }
+
+        // Body rows
+        for row in &table.rows {
+            self.write_table_row(row, &table.columns, false);
+        }
+
+        // Footer row
+        if let Some(foot) = &table.foot {
+            self.write_table_row(foot, &table.columns, false);
+        }
+
+        self.body_xml.push_str("</w:tbl>\n");
+    }
+
+    fn write_table_row(
+        &mut self,
+        cells: &[docmux_ast::TableCell],
+        columns: &[docmux_ast::ColumnSpec],
+        is_header: bool,
+    ) {
+        self.body_xml.push_str("<w:tr>");
+        if is_header {
+            self.body_xml.push_str("<w:trPr><w:tblHeader/></w:trPr>");
+        }
+        self.body_xml.push('\n');
+
+        for (i, cell) in cells.iter().enumerate() {
+            self.body_xml.push_str("<w:tc><w:tcPr>");
+            self.body_xml.push_str("<w:tcW w:w=\"0\" w:type=\"auto\"/>");
+
+            if cell.colspan > 1 {
+                write!(self.body_xml, "<w:gridSpan w:val=\"{}\"/>", cell.colspan).unwrap();
+            }
+            if cell.rowspan > 1 {
+                self.body_xml.push_str("<w:vMerge w:val=\"restart\"/>");
+            }
+
+            // Column alignment as paragraph justification
+            if let Some(col) = columns.get(i) {
+                match col.alignment {
+                    Alignment::Center => {
+                        self.body_xml.push_str("<w:vAlign w:val=\"center\"/>");
+                    }
+                    Alignment::Right => {
+                        self.body_xml.push_str("<w:vAlign w:val=\"bottom\"/>");
+                    }
+                    Alignment::Left | Alignment::Default => {}
+                }
+            }
+
+            self.body_xml.push_str("</w:tcPr>\n");
+
+            // Cell content — OOXML requires at least one <w:p> per cell
+            if cell.content.is_empty() {
+                self.body_xml.push_str("<w:p/>\n");
+            } else {
+                for block in &cell.content {
+                    self.write_block(block);
+                }
+            }
+
+            self.body_xml.push_str("</w:tc>\n");
+        }
+
+        self.body_xml.push_str("</w:tr>\n");
     }
 
     fn write_inlines(&mut self, inlines: &[Inline], run_props: &[&str]) {
@@ -940,6 +1050,95 @@ mod tests {
         assert!(
             xml.contains(r#"<w:bottom w:val="single""#),
             "missing bottom border, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn table_renders_with_header_and_rows() {
+        use docmux_ast::{Alignment, ColumnSpec, Table, TableCell};
+
+        let doc = Document {
+            content: vec![Block::Table(Table {
+                caption: Some(vec![Inline::Text {
+                    value: "Results".into(),
+                }]),
+                label: None,
+                columns: vec![
+                    ColumnSpec {
+                        alignment: Alignment::Left,
+                        width: None,
+                    },
+                    ColumnSpec {
+                        alignment: Alignment::Right,
+                        width: None,
+                    },
+                ],
+                header: Some(vec![
+                    TableCell {
+                        content: vec![Block::Paragraph {
+                            content: vec![Inline::Text {
+                                value: "Name".into(),
+                            }],
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                    TableCell {
+                        content: vec![Block::Paragraph {
+                            content: vec![Inline::Text {
+                                value: "Score".into(),
+                            }],
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                ]),
+                rows: vec![vec![
+                    TableCell {
+                        content: vec![Block::Paragraph {
+                            content: vec![Inline::Text {
+                                value: "Alice".into(),
+                            }],
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                    TableCell {
+                        content: vec![Block::Paragraph {
+                            content: vec![Inline::Text { value: "95".into() }],
+                        }],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                ]],
+                foot: None,
+                attrs: None,
+            })],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        assert!(
+            xml.contains("<w:tbl>"),
+            "missing w:tbl element, got:\n{xml}"
+        );
+        assert!(xml.contains("<w:tr>"), "missing w:tr element, got:\n{xml}");
+        assert!(xml.contains("<w:tc>"), "missing w:tc element, got:\n{xml}");
+        assert!(
+            xml.contains("<w:t>Name</w:t>"),
+            "missing header cell Name, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Alice</w:t>"),
+            "missing body cell Alice, got:\n{xml}"
+        );
+        // Caption rendered as a paragraph
+        assert!(
+            xml.contains("<w:t>Results</w:t>"),
+            "missing caption text, got:\n{xml}"
         );
     }
 
