@@ -44,6 +44,14 @@ struct Relationship {
 
 // ─── DocxBuilder ────────────────────────────────────────────────────────────
 
+/// A numbering definition for lists (maps to abstractNum + num in numbering.xml).
+struct NumberingDef {
+    abstract_num_id: u32,
+    num_id: u32,
+    is_ordered: bool,
+    num_fmt: String,
+}
+
 /// Builds the OOXML parts and assembles them into a ZIP archive.
 #[allow(dead_code)]
 struct DocxBuilder {
@@ -52,9 +60,11 @@ struct DocxBuilder {
     footnotes: Vec<(u32, String)>,
     media: Vec<(String, Vec<u8>)>,
     numbering_xml: Option<String>,
+    numbering_defs: Vec<NumberingDef>,
     next_rel_id: u32,
     next_footnote_id: u32,
     next_image_id: u32,
+    next_num_id: u32,
 }
 
 impl DocxBuilder {
@@ -65,9 +75,11 @@ impl DocxBuilder {
             footnotes: Vec::new(),
             media: Vec::new(),
             numbering_xml: None,
+            numbering_defs: Vec::new(),
             next_rel_id: 1,
             next_footnote_id: 2,
             next_image_id: 1,
+            next_num_id: 1,
         }
     }
 
@@ -154,6 +166,9 @@ impl DocxBuilder {
             }
             Block::Table(table) => {
                 self.write_table(table);
+            }
+            list @ Block::List { .. } => {
+                self.write_list(list, 0);
             }
             _ => {}
         }
@@ -301,6 +316,122 @@ impl DocxBuilder {
         }
 
         self.body_xml.push_str("</w:tr>\n");
+    }
+
+    fn get_or_create_numbering(
+        &mut self,
+        ordered: bool,
+        style: Option<&docmux_ast::ListStyle>,
+    ) -> u32 {
+        let num_fmt = if ordered {
+            match style {
+                Some(docmux_ast::ListStyle::LowerAlpha) => "lowerLetter",
+                Some(docmux_ast::ListStyle::UpperAlpha) => "upperLetter",
+                Some(docmux_ast::ListStyle::LowerRoman) => "lowerRoman",
+                Some(docmux_ast::ListStyle::UpperRoman) => "upperRoman",
+                _ => "decimal",
+            }
+        } else {
+            "bullet"
+        };
+
+        // Reuse existing def if same format
+        for def in &self.numbering_defs {
+            if def.is_ordered == ordered && def.num_fmt == num_fmt {
+                return def.num_id;
+            }
+        }
+
+        let id = self.next_num_id;
+        self.next_num_id += 1;
+        self.numbering_defs.push(NumberingDef {
+            abstract_num_id: id,
+            num_id: id,
+            is_ordered: ordered,
+            num_fmt: num_fmt.to_string(),
+        });
+        id
+    }
+
+    fn write_list(&mut self, list: &Block, depth: u32) {
+        if let Block::List {
+            ordered,
+            items,
+            style,
+            ..
+        } = list
+        {
+            let num_id = self.get_or_create_numbering(*ordered, style.as_ref());
+
+            for item in items {
+                for block in &item.content {
+                    match block {
+                        Block::Paragraph { content } => {
+                            self.body_xml.push_str("<w:p><w:pPr>");
+                            write!(
+                                self.body_xml,
+                                "<w:numPr><w:ilvl w:val=\"{depth}\"/>\
+                                 <w:numId w:val=\"{num_id}\"/></w:numPr>"
+                            )
+                            .unwrap();
+                            self.body_xml.push_str("</w:pPr>");
+                            self.write_inlines(content, &[]);
+                            self.body_xml.push_str("</w:p>\n");
+                        }
+                        nested @ Block::List { .. } => {
+                            self.write_list(nested, depth + 1);
+                        }
+                        other => self.write_block(other),
+                    }
+                }
+            }
+        }
+    }
+
+    fn build_numbering_xml(&self) -> Option<String> {
+        if self.numbering_defs.is_empty() {
+            return None;
+        }
+
+        let mut xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n\
+             <w:numbering xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\n",
+        );
+
+        for def in &self.numbering_defs {
+            let lvl_text = if def.num_fmt == "bullet" {
+                "<w:lvlText w:val=\"\u{2022}\"/>"
+            } else {
+                "<w:lvlText w:val=\"%1.\"/>"
+            };
+            write!(
+                xml,
+                "<w:abstractNum w:abstractNumId=\"{id}\">\
+                 <w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/>\
+                 <w:numFmt w:val=\"{fmt}\"/>{lvl_text}\
+                 <w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl>\
+                 <w:lvl w:ilvl=\"1\"><w:start w:val=\"1\"/>\
+                 <w:numFmt w:val=\"{fmt}\"/>{lvl_text}\
+                 <w:pPr><w:ind w:left=\"1440\" w:hanging=\"360\"/></w:pPr></w:lvl>\
+                 <w:lvl w:ilvl=\"2\"><w:start w:val=\"1\"/>\
+                 <w:numFmt w:val=\"{fmt}\"/>{lvl_text}\
+                 <w:pPr><w:ind w:left=\"2160\" w:hanging=\"360\"/></w:pPr></w:lvl>\
+                 </w:abstractNum>\n",
+                id = def.abstract_num_id,
+                fmt = def.num_fmt,
+            )
+            .unwrap();
+
+            write!(
+                xml,
+                "<w:num w:numId=\"{}\"><w:abstractNumId w:val=\"{}\"/></w:num>\n",
+                def.num_id, def.abstract_num_id
+            )
+            .unwrap();
+        }
+
+        xml.push_str("</w:numbering>");
+        Some(xml)
     }
 
     fn write_inlines(&mut self, inlines: &[Inline], run_props: &[&str]) {
@@ -694,6 +825,7 @@ impl Writer for DocxWriter {
         let mut builder = DocxBuilder::new();
         builder.write_metadata(&doc.metadata);
         builder.write_blocks(&doc.content);
+        builder.numbering_xml = builder.build_numbering_xml();
         builder.assemble_zip()
     }
 }
@@ -1139,6 +1271,102 @@ mod tests {
         assert!(
             xml.contains("<w:t>Results</w:t>"),
             "missing caption text, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn unordered_list_renders_bullets() {
+        use docmux_ast::ListItem;
+
+        let doc = Document {
+            content: vec![Block::List {
+                ordered: false,
+                start: None,
+                items: vec![
+                    ListItem {
+                        checked: None,
+                        content: vec![Block::Paragraph {
+                            content: vec![Inline::Text {
+                                value: "First".into(),
+                            }],
+                        }],
+                    },
+                    ListItem {
+                        checked: None,
+                        content: vec![Block::Paragraph {
+                            content: vec![Inline::Text {
+                                value: "Second".into(),
+                            }],
+                        }],
+                    },
+                ],
+                tight: true,
+                style: None,
+                delimiter: None,
+            }],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        assert!(
+            xml.contains("<w:numPr>"),
+            "missing numPr element, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>First</w:t>"),
+            "missing First text, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Second</w:t>"),
+            "missing Second text, got:\n{xml}"
+        );
+
+        // Verify numbering.xml exists in the ZIP
+        let cursor = std::io::Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        assert!(
+            archive.by_name("word/numbering.xml").is_ok(),
+            "missing word/numbering.xml in ZIP"
+        );
+    }
+
+    #[test]
+    fn ordered_list_renders_numbers() {
+        use docmux_ast::ListItem;
+
+        let doc = Document {
+            content: vec![Block::List {
+                ordered: true,
+                start: Some(1),
+                items: vec![ListItem {
+                    checked: None,
+                    content: vec![Block::Paragraph {
+                        content: vec![Inline::Text {
+                            value: "Alpha".into(),
+                        }],
+                    }],
+                }],
+                tight: true,
+                style: None,
+                delimiter: None,
+            }],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        assert!(
+            xml.contains("<w:numPr>"),
+            "missing numPr element, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Alpha</w:t>"),
+            "missing Alpha text, got:\n{xml}"
         );
     }
 
