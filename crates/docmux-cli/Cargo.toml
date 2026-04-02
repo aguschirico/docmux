@@ -25,6 +25,7 @@ docmux-writer-typst = { workspace = true }
 docmux-writer-plaintext = { workspace = true }
 docmux-writer-docx = { workspace = true }
 docmux-reader-html = { workspace = true }
+docmux-reader-docx = { workspace = true }
 docmux-highlight = { workspace = true }
 docmux-transform-toc = { workspace = true }
 docmux-transform-number-sections = { workspace = true }

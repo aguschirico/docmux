@@ -5,6 +5,7 @@
 use clap::Parser;
 use docmux_ast::{Block, Metadata};
 use docmux_core::{Eol, MathEngine, Registry, Transform, TransformContext, WrapMode, WriteOptions};
+use docmux_reader_docx::DocxReader;
 use docmux_reader_html::HtmlReader;
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
@@ -134,6 +135,7 @@ fn build_registry() -> Registry {
     reg.add_reader(Box::new(MystReader::new()));
     reg.add_reader(Box::new(TypstReader::new()));
     reg.add_reader(Box::new(HtmlReader::new()));
+    reg.add_binary_reader(Box::new(DocxReader::new()));
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
     reg.add_writer(Box::new(MarkdownWriter::new()));
@@ -175,28 +177,6 @@ fn main() {
         return;
     }
 
-    // Read and concatenate all inputs
-    let mut combined_input = String::new();
-    for (i, path) in cli.input.iter().enumerate() {
-        if i > 0 {
-            combined_input.push('\n');
-        }
-        if path.to_str() == Some("-") {
-            if let Err(e) = std::io::stdin().read_to_string(&mut combined_input) {
-                eprintln!("docmux: error reading stdin: {e}");
-                std::process::exit(1);
-            }
-        } else {
-            match std::fs::read_to_string(path) {
-                Ok(s) => combined_input.push_str(&s),
-                Err(e) => {
-                    eprintln!("docmux: error reading {}: {e}", path.display());
-                    std::process::exit(1);
-                }
-            }
-        }
-    }
-
     // Determine input format from first non-stdin file
     let from = cli.from.as_deref().or_else(|| {
         cli.input
@@ -219,24 +199,71 @@ fn main() {
         })
         .unwrap_or("html");
 
-    // Look up reader
-    let reader = match registry.find_reader(from) {
-        Some(r) => r,
-        None => {
-            eprintln!(
-                "docmux: unsupported input format '{from}'. Available: {:?}",
-                registry.reader_formats()
-            );
+    // Parse — binary formats (e.g. DOCX) are read as bytes; text formats as String.
+    let mut doc = if let Some(binary_reader) = registry.find_binary_reader(from) {
+        // Read the first input file as bytes (binary formats don't support stdin or multi-file)
+        let path = cli.input.first().unwrap_or_else(|| {
+            eprintln!("docmux: binary input requires a file path (not stdin)");
+            std::process::exit(1);
+        });
+        if path.to_str() == Some("-") {
+            eprintln!("docmux: binary input format '{from}' cannot be read from stdin");
             std::process::exit(1);
         }
-    };
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("docmux: error reading {}: {e}", path.display());
+                std::process::exit(1);
+            }
+        };
+        match binary_reader.read_bytes(&bytes) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("docmux: parse error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Text path — read and concatenate all inputs
+        let reader = match registry.find_reader(from) {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "docmux: unsupported input format '{from}'. Available: {:?}",
+                    registry.reader_formats()
+                );
+                std::process::exit(1);
+            }
+        };
 
-    // Parse
-    let mut doc = match reader.read(&combined_input) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("docmux: parse error: {e}");
-            std::process::exit(1);
+        let mut combined_input = String::new();
+        for (i, path) in cli.input.iter().enumerate() {
+            if i > 0 {
+                combined_input.push('\n');
+            }
+            if path.to_str() == Some("-") {
+                if let Err(e) = std::io::stdin().read_to_string(&mut combined_input) {
+                    eprintln!("docmux: error reading stdin: {e}");
+                    std::process::exit(1);
+                }
+            } else {
+                match std::fs::read_to_string(path) {
+                    Ok(s) => combined_input.push_str(&s),
+                    Err(e) => {
+                        eprintln!("docmux: error reading {}: {e}", path.display());
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+
+        match reader.read(&combined_input) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("docmux: parse error: {e}");
+                std::process::exit(1);
+            }
         }
     };
 

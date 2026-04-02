@@ -40,6 +40,19 @@ impl From<DocxError> for docmux_core::ConvertError {
 /// A reader that parses DOCX binary input into a [`Document`].
 pub struct DocxReader;
 
+impl DocxReader {
+    /// Create a new `DocxReader`.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for DocxReader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BinaryReader for DocxReader {
     fn format(&self) -> &str {
         "docx"
@@ -256,5 +269,64 @@ mod tests {
         let reader = DocxReader;
         let result = reader.read_bytes(&zip_bytes);
         assert!(result.is_err());
+    }
+
+    // ─── Roundtrip tests (markdown → DOCX bytes → AST) ──────────────────────
+
+    fn roundtrip(markdown: &str) -> Document {
+        use docmux_core::{BinaryReader as _, Reader as _, WriteOptions, Writer as _};
+        use docmux_reader_markdown::MarkdownReader;
+        use docmux_writer_docx::DocxWriter;
+
+        let md_reader = MarkdownReader::new();
+        let doc = md_reader.read(markdown).unwrap();
+
+        let docx_writer = DocxWriter::new();
+        let bytes = docx_writer
+            .write_bytes(&doc, &WriteOptions::default())
+            .unwrap();
+
+        DocxReader::new().read_bytes(&bytes).unwrap()
+    }
+
+    #[test]
+    fn roundtrip_markdown_basic() {
+        let recovered = roundtrip("# Hello\n\nBold paragraph.\n\n## Sub\n\nAnother.");
+        let has_heading = recovered
+            .content
+            .iter()
+            .any(|b| matches!(b, Block::Heading { .. }));
+        let has_paragraph = recovered
+            .content
+            .iter()
+            .any(|b| matches!(b, Block::Paragraph { .. }));
+        assert!(
+            has_heading,
+            "expected at least one Heading in recovered AST"
+        );
+        assert!(
+            has_paragraph,
+            "expected at least one Paragraph in recovered AST"
+        );
+    }
+
+    #[test]
+    fn roundtrip_code_block() {
+        let recovered = roundtrip("```rust\nfn main() {}\n```");
+        let has_code = recovered
+            .content
+            .iter()
+            .any(|b| matches!(b, Block::CodeBlock { .. }));
+        assert!(has_code, "expected a CodeBlock in recovered AST");
+    }
+
+    #[test]
+    fn roundtrip_table() {
+        let recovered = roundtrip("| A | B |\n|---|---|\n| 1 | 2 |");
+        let has_table = recovered
+            .content
+            .iter()
+            .any(|b| matches!(b, Block::Table(_)));
+        assert!(has_table, "expected a Table in recovered AST");
     }
 }
