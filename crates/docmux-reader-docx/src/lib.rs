@@ -3,6 +3,7 @@
 //! DOCX reader for docmux — parses a DOCX ZIP archive into the docmux AST.
 
 mod archive;
+pub(crate) mod relationships;
 
 use archive::DocxArchive;
 use docmux_ast::Document;
