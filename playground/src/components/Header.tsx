@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
-import { FolderOpen, Plus, ChevronDown } from "lucide-react";
+import { FolderOpen, Plus, ChevronDown, FileUp } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,6 +9,7 @@ import {
 import { useWorkspace } from "@/contexts/workspace-context";
 import { db, createWorkspace } from "@/vfs/db";
 import { importFolder } from "@/vfs/import";
+import { useDocxImport } from "@/hooks/useDocxImport";
 import { toast } from "sonner";
 
 export function Header() {
@@ -16,6 +17,7 @@ export function Header() {
     useWorkspace();
   const workspaces = useLiveQuery(() => db.workspaces.toArray());
 
+  const { openFilePicker: openDocx } = useDocxImport();
   const activeWs = workspaces?.find((ws) => ws.id === activeWorkspaceId);
 
   async function handleNewWorkspace() {
@@ -74,6 +76,14 @@ export function Header() {
       </DropdownMenu>
 
       <div className="flex-1" />
+
+      <button
+        className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+        onClick={openDocx}
+      >
+        <FileUp className="h-3.5 w-3.5" />
+        Open .docx
+      </button>
 
       <button
         className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"

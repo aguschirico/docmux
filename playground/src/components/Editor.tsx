@@ -1,16 +1,19 @@
-import { FileText, FolderOpen } from "lucide-react";
+import { FileText, FolderOpen, FileUp } from "lucide-react";
 import MonacoEditor from "@monaco-editor/react";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useActiveFile } from "@/components/editor/useActiveFile";
-import { getMonacoLanguage } from "@/lib/formats";
+import { useDocxImport } from "@/hooks/useDocxImport";
+import { useDropZone } from "@/hooks/useDropZone";
+import { getMonacoLanguage, isBinaryFormat } from "@/lib/formats";
 
 interface EmptyStateProps {
   icon: React.ReactNode;
   title: string;
   description: string;
+  action?: React.ReactNode;
 }
 
-function EmptyState({ icon, title, description }: EmptyStateProps) {
+function EmptyState({ icon, title, description, action }: EmptyStateProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 text-zinc-600">
@@ -20,13 +23,41 @@ function EmptyState({ icon, title, description }: EmptyStateProps) {
         <p className="text-sm font-medium text-zinc-400">{title}</p>
         <p className="text-xs text-zinc-600">{description}</p>
       </div>
+      {action}
     </div>
+  );
+}
+
+function DropOverlay() {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
+      <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-blue-500 px-10 py-8">
+        <FileUp className="h-8 w-8 text-blue-400" />
+        <p className="text-sm font-medium text-blue-300">Drop .docx file</p>
+      </div>
+    </div>
+  );
+}
+
+function DocxButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors"
+      onClick={onClick}
+    >
+      <FileUp className="h-3.5 w-3.5" />
+      Open .docx
+    </button>
   );
 }
 
 export function Editor() {
   const { activeWorkspaceId, activeFileId } = useWorkspace();
   const { content, filePath, onChange } = useActiveFile(activeFileId);
+  const { importDocxFile, openFilePicker } = useDocxImport();
+  const { isDragging, dropProps } = useDropZone(importDocxFile);
+
+  const isBinary = filePath ? isBinaryFormat(filePath) : false;
 
   if (!activeWorkspaceId) {
     return (
@@ -40,33 +71,54 @@ export function Editor() {
 
   if (!activeFileId || !filePath) {
     return (
-      <EmptyState
-        icon={<FileText className="h-5 w-5" />}
-        title="No file selected"
-        description="Pick a file from the sidebar to open it here"
-      />
+      <div className="relative h-full" {...dropProps}>
+        {isDragging && <DropOverlay />}
+        <EmptyState
+          icon={<FileText className="h-5 w-5" />}
+          title="No file selected"
+          description="Pick a file from the sidebar, or drop a .docx here"
+          action={<DocxButton onClick={openFilePicker} />}
+        />
+      </div>
+    );
+  }
+
+  if (isBinary) {
+    return (
+      <div className="relative h-full" {...dropProps}>
+        {isDragging && <DropOverlay />}
+        <EmptyState
+          icon={<FileText className="h-5 w-5" />}
+          title={filePath}
+          description="Binary file — check Preview and AST tabs for output"
+          action={<DocxButton onClick={openFilePicker} />}
+        />
+      </div>
     );
   }
 
   return (
-    <MonacoEditor
-      height="100%"
-      theme="vs-dark"
-      language={getMonacoLanguage(filePath)}
-      value={content}
-      onChange={onChange}
-      options={{
-        minimap: { enabled: false },
-        fontSize: 13,
-        fontFamily: "JetBrains Mono, Fira Code, monospace",
-        lineNumbers: "on",
-        scrollBeyondLastLine: false,
-        wordWrap: "on",
-        padding: { top: 12 },
-        renderLineHighlight: "gutter",
-        bracketPairColorization: { enabled: true },
-        tabSize: 2,
-      }}
-    />
+    <div className="relative h-full" {...dropProps}>
+      {isDragging && <DropOverlay />}
+      <MonacoEditor
+        height="100%"
+        theme="vs-dark"
+        language={getMonacoLanguage(filePath)}
+        value={content}
+        onChange={onChange}
+        options={{
+          minimap: { enabled: false },
+          fontSize: 13,
+          fontFamily: "JetBrains Mono, Fira Code, monospace",
+          lineNumbers: "on",
+          scrollBeyondLastLine: false,
+          wordWrap: "on",
+          padding: { top: 12 },
+          renderLineHighlight: "gutter",
+          bracketPairColorization: { enabled: true },
+          tabSize: 2,
+        }}
+      />
+    </div>
   );
 }

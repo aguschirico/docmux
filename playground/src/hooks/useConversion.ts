@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   convert,
   convertStandalone,
+  convertBytes,
+  convertBytesStandalone,
   parseToJson,
+  parseBytesToJson,
   type ConvertOutcome,
 } from "@/wasm/docmux";
 
@@ -33,12 +36,15 @@ export function useConversion(
   content: string | null,
   inputFormat: string | null,
   outputFormat: string,
+  binaryContent?: Uint8Array | null,
 ): ConversionState {
   const [state, setState] = useState<ConversionState>(INITIAL);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const seqRef = useRef(0);
 
-  const hasInput = content !== null && inputFormat !== null;
+  const hasBinary = binaryContent != null && binaryContent.length > 0 && inputFormat !== null;
+  const hasText = content !== null && inputFormat !== null;
+  const hasInput = hasBinary || hasText;
 
   useEffect(() => {
     if (!hasInput) return;
@@ -48,11 +54,20 @@ export function useConversion(
       const seq = ++seqRef.current;
       setState((prev) => ({ ...prev, converting: true }));
 
-      Promise.all([
-        convertStandalone(content, inputFormat, "html"),
-        convert(content, inputFormat, outputFormat),
-        parseToJson(content, inputFormat),
-      ]).then(([previewResult, sourceResult, astResult]) => {
+      const conversions: Promise<[ConvertOutcome, ConvertOutcome, ConvertOutcome]> =
+        hasBinary
+          ? Promise.all([
+              convertBytesStandalone(binaryContent, inputFormat!, "html"),
+              convertBytes(binaryContent, inputFormat!, outputFormat),
+              parseBytesToJson(binaryContent, inputFormat!),
+            ])
+          : Promise.all([
+              convertStandalone(content!, inputFormat!, "html"),
+              convert(content!, inputFormat!, outputFormat),
+              parseToJson(content!, inputFormat!),
+            ]);
+
+      conversions.then(([previewResult, sourceResult, astResult]) => {
         if (seq !== seqRef.current) return;
 
         const errors: string[] = [];
@@ -74,7 +89,7 @@ export function useConversion(
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timerRef.current);
-  }, [content, inputFormat, outputFormat, hasInput]);
+  }, [content, binaryContent, inputFormat, outputFormat, hasInput, hasBinary]);
 
   if (!hasInput) return INITIAL;
   return state;

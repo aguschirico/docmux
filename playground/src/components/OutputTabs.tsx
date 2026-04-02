@@ -11,7 +11,7 @@ import {
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useConversion } from "@/hooks/useConversion";
 import { db } from "@/vfs/db";
-import { getFormat } from "@/lib/formats";
+import { getFormat, isBinaryFormat } from "@/lib/formats";
 import { HtmlPreview } from "@/components/output-tabs/HtmlPreview";
 import { ReadOnlyEditor } from "@/components/output-tabs/ReadOnlyEditor";
 import { DiagnosticsView } from "@/components/output-tabs/DiagnosticsView";
@@ -42,12 +42,17 @@ export function OutputTabs() {
   );
 
   const inputFormat = file?.path ? getFormat(file.path) : null;
-  const content = file?.content ?? null;
+  const isBinary = inputFormat ? isBinaryFormat(inputFormat) : false;
+  const content = isBinary ? null : (file?.content ?? null);
+  const binaryContent = isBinary && file?.binaryContent
+    ? new Uint8Array(file.binaryContent)
+    : null;
 
   const { preview, source, ast, errors, converting } = useConversion(
     content,
     inputFormat,
     outputFormat,
+    binaryContent,
   );
 
   return (

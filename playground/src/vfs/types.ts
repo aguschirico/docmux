@@ -9,5 +9,7 @@ export interface VfsFile {
   workspaceId: number;
   path: string;
   content: string;
+  /** Raw bytes for binary formats (e.g. DOCX). When set, `content` is empty. */
+  binaryContent?: ArrayBuffer;
   updatedAt: Date;
 }

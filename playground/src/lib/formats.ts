@@ -12,6 +12,7 @@ const EXTENSION_TO_FORMAT: Record<string, string> = {
   yml: "yaml",
   myst: "myst",
   bib: "bibtex",
+  docx: "docx",
 };
 
 const EXTENSION_TO_MONACO: Record<string, string> = {
@@ -44,4 +45,11 @@ export function getFormat(path: string): string {
 
 export function getMonacoLanguage(path: string): string {
   return EXTENSION_TO_MONACO[getExtension(path)] ?? "plaintext";
+}
+
+const BINARY_FORMATS = new Set(["docx"]);
+
+export function isBinaryFormat(formatOrPath: string): boolean {
+  const ext = formatOrPath.includes(".") ? getExtension(formatOrPath) : formatOrPath;
+  return BINARY_FORMATS.has(ext);
 }

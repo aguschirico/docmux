@@ -96,6 +96,20 @@ export async function createFile(
   })) as number;
 }
 
+export async function createBinaryFile(
+  workspaceId: number,
+  path: string,
+  binaryContent: ArrayBuffer,
+): Promise<number> {
+  return (await db.files.add({
+    workspaceId,
+    path,
+    content: "",
+    binaryContent,
+    updatedAt: new Date(),
+  })) as number;
+}
+
 export async function updateFileContent(
   fileId: number,
   content: string,
