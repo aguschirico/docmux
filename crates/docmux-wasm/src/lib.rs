@@ -4,6 +4,7 @@
 //! to JavaScript/TypeScript via wasm-bindgen.
 
 use docmux_core::{Registry, Transform, WriteOptions};
+use docmux_reader_docx::DocxReader;
 use docmux_reader_html::HtmlReader;
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
@@ -28,6 +29,7 @@ fn build_registry() -> Registry {
     reg.add_reader(Box::new(TypstReader::new()));
     reg.add_reader(Box::new(MystReader::new()));
     reg.add_reader(Box::new(HtmlReader::new()));
+    reg.add_binary_reader(Box::new(DocxReader::new()));
 
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
@@ -125,4 +127,68 @@ pub fn input_formats() -> Vec<String> {
 pub fn output_formats() -> Vec<String> {
     let reg = build_registry();
     reg.writer_formats().into_iter().map(String::from).collect()
+}
+
+/// Convert binary input (e.g. DOCX bytes) to another format (fragment mode).
+///
+/// # Arguments
+/// - `input` — the raw binary content (e.g. DOCX bytes from `FileReader`)
+/// - `from` — input format name or extension (e.g. `"docx"`)
+/// - `to`   — output format name or extension (e.g. `"html"`)
+#[wasm_bindgen(js_name = "convertBytes")]
+pub fn convert_bytes(input: &[u8], from: &str, to: &str) -> Result<String, JsError> {
+    convert_bytes_inner(input, from, to, false)
+}
+
+/// Convert binary input producing a standalone file (full HTML, LaTeX with preamble, etc.).
+#[wasm_bindgen(js_name = "convertBytesStandalone")]
+pub fn convert_bytes_standalone(input: &[u8], from: &str, to: &str) -> Result<String, JsError> {
+    convert_bytes_inner(input, from, to, true)
+}
+
+fn convert_bytes_inner(
+    input: &[u8],
+    from: &str,
+    to: &str,
+    standalone: bool,
+) -> Result<String, JsError> {
+    let reg = build_registry();
+    let binary_reader = reg
+        .find_binary_reader(from)
+        .ok_or_else(|| JsError::new(&format!("unsupported binary input format: {from}")))?;
+    let writer = reg
+        .find_writer(to)
+        .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
+    let mut doc = binary_reader
+        .read_bytes(input)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let ctx = docmux_core::TransformContext::default();
+    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
+    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    let _ = TocTransform::new().transform(&mut doc, &ctx);
+    let opts = WriteOptions {
+        standalone,
+        highlight_style: if to == "html" {
+            Some("InspiredGitHub".into())
+        } else {
+            None
+        },
+        ..Default::default()
+    };
+    writer
+        .write(&doc, &opts)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Parse binary input and return the AST as pretty-printed JSON.
+#[wasm_bindgen(js_name = "parseBytesToJson")]
+pub fn parse_bytes_to_json(input: &[u8], from: &str) -> Result<String, JsError> {
+    let reg = build_registry();
+    let binary_reader = reg
+        .find_binary_reader(from)
+        .ok_or_else(|| JsError::new(&format!("unsupported binary input format: {from}")))?;
+    let doc = binary_reader
+        .read_bytes(input)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string_pretty(&doc).map_err(|e| JsError::new(&e.to_string()))
 }

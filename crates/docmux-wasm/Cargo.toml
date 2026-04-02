@@ -20,6 +20,7 @@ docmux-reader-latex = { workspace = true }
 docmux-reader-typst = { workspace = true }
 docmux-reader-myst = { workspace = true }
 docmux-reader-html = { workspace = true }
+docmux-reader-docx = { workspace = true }
 docmux-highlight = { workspace = true }
 
 # Writers
