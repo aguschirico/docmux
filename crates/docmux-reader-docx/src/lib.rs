@@ -4,6 +4,7 @@
 
 mod archive;
 pub(crate) mod relationships;
+pub(crate) mod styles;
 
 use archive::DocxArchive;
 use docmux_ast::Document;
