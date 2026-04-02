@@ -13,6 +13,7 @@ pub(crate) mod styles;
 use archive::DocxArchive;
 use docmux_ast::{Block, Document};
 use docmux_core::{BinaryReader, Result as CoreResult};
+use std::collections::HashMap;
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ impl BinaryReader for DocxReader {
             content,
             bibliography: None,
             warnings: vec![],
+            resources: HashMap::new(),
         })
     }
 }

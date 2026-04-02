@@ -3,6 +3,7 @@ use docmux_ast::{
     DefinitionItem, Document, Image, Inline, ListItem, MetaValue, Metadata, ParseWarning, RefForm,
     Table, TableCell,
 };
+use std::collections::HashMap;
 
 use crate::lexer::Token;
 use crate::unescape::unescape_latex;
@@ -78,6 +79,7 @@ impl Parser {
             content: all_content,
             bibliography: None,
             warnings: self.warnings,
+            resources: HashMap::new(),
         }
     }
 

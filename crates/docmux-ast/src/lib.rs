@@ -24,6 +24,15 @@ pub struct ParseWarning {
     pub message: String,
 }
 
+/// Binary resource embedded in the document (e.g. an image from a DOCX).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ResourceData {
+    pub mime_type: String,
+    /// Raw bytes — skipped during serialization to keep JSON output clean.
+    #[serde(skip)]
+    pub data: Vec<u8>,
+}
+
 /// A complete document: metadata + content + optional bibliography.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Document {
@@ -32,6 +41,9 @@ pub struct Document {
     pub bibliography: Option<Bibliography>,
     #[serde(default)]
     pub warnings: Vec<ParseWarning>,
+    /// Embedded binary resources keyed by relative path (e.g. "media/image1.png").
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub resources: HashMap<String, ResourceData>,
 }
 
 // ─── Metadata ────────────────────────────────────────────────────────────────
@@ -591,6 +603,7 @@ mod tests {
             ],
             bibliography: None,
             warnings: vec![],
+            resources: HashMap::new(),
         };
 
         assert_eq!(doc.content.len(), 3);
@@ -667,6 +680,7 @@ mod tests {
             content: vec![Block::text("Hello")],
             bibliography: None,
             warnings: vec![],
+            resources: HashMap::new(),
         };
 
         let json = serde_json::to_string(&doc).expect("serialize");

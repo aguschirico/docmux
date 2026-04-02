@@ -119,6 +119,7 @@ impl Parser {
             content: all_content,
             bibliography: None,
             warnings: self.warnings,
+            resources: HashMap::new(),
         }
     }
 

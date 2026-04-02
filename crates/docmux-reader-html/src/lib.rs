@@ -17,6 +17,7 @@ use docmux_ast::{
 };
 use docmux_core::{Reader, Result};
 use scraper::{ElementRef, Html, Node, Selector};
+use std::collections::HashMap;
 
 /// An HTML reader.
 #[derive(Debug, Default)]
@@ -688,6 +689,7 @@ impl Reader for HtmlReader {
             content: blocks,
             bibliography: None,
             warnings: Vec::new(),
+            resources: HashMap::new(),
         })
     }
 }

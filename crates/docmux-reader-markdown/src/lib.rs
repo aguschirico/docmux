@@ -523,6 +523,7 @@ impl Reader for MarkdownReader {
             content,
             bibliography: None,
             warnings: vec![],
+            resources: HashMap::new(),
         })
     }
 }
