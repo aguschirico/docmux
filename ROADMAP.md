@@ -125,7 +125,12 @@
 
 ### Readers & writers
 
-- [x] DOCX reader (43 tests, BinaryReader trait, style classifier, CLI + WASM integration)
+- [x] DOCX reader (49 tests, BinaryReader trait, style classifier, CLI + WASM integration)
+  - [x] Document body, tables, multi-paragraph cells, hyperlinks, footnotes
+  - [x] Image extraction (`<w:drawing>` inline + anchor → `Document.resources` → data URIs)
+  - [ ] Character styling (`<w:color>`, `<w:sz>`, `<w:highlight>` → inline CSS in HTML output)
+  - [ ] List assembly (numbered/bulleted from `<w:numPr>`)
+  - [ ] Drawing/shape parsing (VML `<v:imagedata>`, SmartArt)
 - [ ] EPUB reader + writer
 - [ ] reStructuredText reader + writer
 - [ ] AsciiDoc reader
