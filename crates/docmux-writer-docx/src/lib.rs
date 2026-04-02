@@ -6,6 +6,7 @@
 
 use docmux_ast::{Alignment, Block, Document, Inline, QuoteType};
 use docmux_core::{ConvertError, Result, WriteOptions, Writer};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
@@ -15,6 +16,11 @@ use zip::ZipWriter;
 // ─── Static assets ──────────────────────────────────────────────────────────
 
 static STYLES_XML: &str = include_str!("styles.xml");
+
+/// Paragraph prefix for admonition boxes (blue left border).
+const ADMONITION_PARA_PREFIX: &str = "<w:p><w:pPr><w:pBdr>\
+    <w:left w:val=\"single\" w:sz=\"12\" w:space=\"8\" w:color=\"4472C4\"/>\
+    </w:pBdr></w:pPr>";
 
 // ─── XML helpers ────────────────────────────────────────────────────────────
 
@@ -53,7 +59,6 @@ struct NumberingDef {
 }
 
 /// Builds the OOXML parts and assembles them into a ZIP archive.
-#[allow(dead_code)]
 struct DocxBuilder {
     body_xml: String,
     relationships: Vec<Relationship>,
@@ -61,6 +66,7 @@ struct DocxBuilder {
     media: Vec<(String, Vec<u8>)>,
     numbering_xml: Option<String>,
     numbering_defs: Vec<NumberingDef>,
+    footnote_id_map: HashMap<String, u32>,
     next_rel_id: u32,
     next_footnote_id: u32,
     next_image_id: u32,
@@ -76,6 +82,7 @@ impl DocxBuilder {
             media: Vec::new(),
             numbering_xml: None,
             numbering_defs: Vec::new(),
+            footnote_id_map: HashMap::new(),
             next_rel_id: 1,
             next_footnote_id: 2,
             next_image_id: 1,
@@ -84,7 +91,6 @@ impl DocxBuilder {
     }
 
     /// Register a relationship and return its rId.
-    #[allow(dead_code)]
     fn add_relationship(&mut self, rel_type: &str, target: &str) -> String {
         let id = format!("rId{}", self.next_rel_id);
         self.next_rel_id += 1;
@@ -97,6 +103,27 @@ impl DocxBuilder {
     }
 
     // ── Block / inline rendering ──────────────────────────────────────
+
+    /// First pass: collect FootnoteDef blocks, assign IDs, and render their content.
+    fn collect_footnotes(&mut self, blocks: &[Block]) {
+        for block in blocks {
+            if let Block::FootnoteDef { id, content } = block {
+                let footnote_id = self.next_footnote_id;
+                self.next_footnote_id += 1;
+                self.footnote_id_map.insert(id.clone(), footnote_id);
+
+                // Render footnote content into a temporary buffer
+                let mut footnote_body = String::new();
+                std::mem::swap(&mut self.body_xml, &mut footnote_body);
+                for child in content {
+                    self.write_block(child);
+                }
+                std::mem::swap(&mut self.body_xml, &mut footnote_body);
+
+                self.footnotes.push((footnote_id, footnote_body));
+            }
+        }
+    }
 
     fn write_blocks(&mut self, blocks: &[Block]) {
         for block in blocks {
@@ -170,7 +197,103 @@ impl DocxBuilder {
             list @ Block::List { .. } => {
                 self.write_list(list, 0);
             }
-            _ => {}
+            Block::Figure { image, caption, .. } => {
+                if let Some((rel_id, cx, cy)) = self.embed_image(&image.url) {
+                    let img_id = self.next_image_id - 1;
+                    self.body_xml
+                        .push_str("<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>");
+                    self.write_image_drawing(&rel_id, &image.alt_text(), img_id, cx, cy);
+                    self.body_xml.push_str("</w:p>\n");
+                } else {
+                    self.body_xml.push_str("<w:p>");
+                    self.write_image_fallback(&image.url);
+                    self.body_xml.push_str("</w:p>\n");
+                }
+                // Caption
+                if let Some(cap) = caption {
+                    self.body_xml
+                        .push_str("<w:p><w:pPr><w:pStyle w:val=\"Caption\"/></w:pPr>");
+                    self.write_inlines(cap, &[]);
+                    self.body_xml.push_str("</w:p>\n");
+                }
+            }
+            Block::Admonition {
+                kind,
+                title,
+                content,
+            } => {
+                let kind_label = match kind {
+                    docmux_ast::AdmonitionKind::Note => "Note",
+                    docmux_ast::AdmonitionKind::Warning => "Warning",
+                    docmux_ast::AdmonitionKind::Tip => "Tip",
+                    docmux_ast::AdmonitionKind::Important => "Important",
+                    docmux_ast::AdmonitionKind::Caution => "Caution",
+                    docmux_ast::AdmonitionKind::Custom(s) => s.as_str(),
+                };
+
+                let title_text = title
+                    .as_ref()
+                    .map(|t| {
+                        t.iter()
+                            .filter_map(|i| {
+                                if let Inline::Text { value } = i {
+                                    Some(value.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<String>()
+                    })
+                    .unwrap_or_else(|| kind_label.to_string());
+
+                // Title with left border and bold
+                self.body_xml.push_str(ADMONITION_PARA_PREFIX);
+                write!(
+                    self.body_xml,
+                    "<w:r><w:rPr><w:b/></w:rPr><w:t>{}</w:t></w:r>",
+                    xml_escape(&title_text)
+                )
+                .unwrap();
+                self.body_xml.push_str("</w:p>\n");
+
+                // Content with same border
+                for child in content {
+                    match child {
+                        Block::Paragraph { content: inlines } => {
+                            self.body_xml.push_str(ADMONITION_PARA_PREFIX);
+                            self.write_inlines(inlines, &[]);
+                            self.body_xml.push_str("</w:p>\n");
+                        }
+                        other => self.write_block(other),
+                    }
+                }
+            }
+            Block::DefinitionList { items } => {
+                for item in items {
+                    // Term in bold
+                    self.body_xml.push_str("<w:p>");
+                    self.write_inlines(&item.term, &["<w:b/>"]);
+                    self.body_xml.push_str("</w:p>\n");
+
+                    // Definitions indented
+                    for def_blocks in &item.definitions {
+                        for block in def_blocks {
+                            match block {
+                                Block::Paragraph { content } => {
+                                    self.body_xml
+                                        .push_str("<w:p><w:pPr><w:ind w:left=\"720\"/></w:pPr>");
+                                    self.write_inlines(content, &[]);
+                                    self.body_xml.push_str("</w:p>\n");
+                                }
+                                other => self.write_block(other),
+                            }
+                        }
+                    }
+                }
+            }
+            Block::FootnoteDef { .. } => {
+                // Rendered during collect_footnotes pass — skip here
+            }
         }
     }
 
@@ -318,6 +441,64 @@ impl DocxBuilder {
         self.body_xml.push_str("</w:tr>\n");
     }
 
+    /// Write an inline drawing element referencing an embedded image.
+    fn write_image_drawing(&mut self, rel_id: &str, alt: &str, img_id: u32, cx: u32, cy: u32) {
+        let alt_escaped = xml_escape(alt);
+        write!(
+            self.body_xml,
+            "<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">\
+             <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\
+             <wp:docPr id=\"{img_id}\" name=\"{alt_escaped}\"/>\
+             <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">\
+             <a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
+             <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
+             <pic:nvPicPr><pic:cNvPr id=\"{img_id}\" name=\"{alt_escaped}\"/><pic:cNvPicPr/></pic:nvPicPr>\
+             <pic:blipFill><a:blip r:embed=\"{rel_id}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\
+             <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>\
+             <a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\
+             </pic:pic></a:graphicData></a:graphic>\
+             </wp:inline></w:drawing></w:r>",
+        )
+        .unwrap();
+    }
+
+    /// Write a fallback text run for an image that couldn't be embedded.
+    fn write_image_fallback(&mut self, url: &str) {
+        write!(
+            self.body_xml,
+            "<w:r><w:t>[Image: {}]</w:t></w:r>",
+            xml_escape(url)
+        )
+        .unwrap();
+    }
+
+    /// Embed a local image file and return (rel_id, width_emu, height_emu).
+    fn embed_image(&mut self, url: &str) -> Option<(String, u32, u32)> {
+        let path = std::path::Path::new(url);
+        if !path.exists() {
+            return None;
+        }
+
+        let data = std::fs::read(path).ok()?;
+        let ext = path.extension()?.to_str()?;
+
+        let filename = format!("image{}.{}", self.next_image_id, ext);
+        self.next_image_id += 1;
+
+        let rel_id = self.add_relationship(
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+            &format!("media/{filename}"),
+        );
+
+        self.media.push((filename, data));
+
+        // Default size: 4in × 3in (1 inch = 914400 EMU)
+        let cx: u32 = 3_657_600;
+        let cy: u32 = 2_743_200;
+
+        Some((rel_id, cx, cy))
+    }
+
     fn get_or_create_numbering(
         &mut self,
         ordered: bool,
@@ -404,7 +585,7 @@ impl DocxBuilder {
             } else {
                 "<w:lvlText w:val=\"%1.\"/>"
             };
-            write!(
+            writeln!(
                 xml,
                 "<w:abstractNum w:abstractNumId=\"{id}\">\
                  <w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/>\
@@ -416,15 +597,15 @@ impl DocxBuilder {
                  <w:lvl w:ilvl=\"2\"><w:start w:val=\"1\"/>\
                  <w:numFmt w:val=\"{fmt}\"/>{lvl_text}\
                  <w:pPr><w:ind w:left=\"2160\" w:hanging=\"360\"/></w:pPr></w:lvl>\
-                 </w:abstractNum>\n",
+                 </w:abstractNum>",
                 id = def.abstract_num_id,
                 fmt = def.num_fmt,
             )
             .unwrap();
 
-            write!(
+            writeln!(
                 xml,
-                "<w:num w:numId=\"{}\"><w:abstractNumId w:val=\"{}\"/></w:num>\n",
+                "<w:num w:numId=\"{}\"><w:abstractNumId w:val=\"{}\"/></w:num>",
                 def.num_id, def.abstract_num_id
             )
             .unwrap();
@@ -563,8 +744,37 @@ impl DocxBuilder {
                 self.body_xml.push_str(&xml_escape(&cross_ref.target));
                 self.body_xml.push_str("</w:t></w:r>");
             }
-            // Skip for now (handled in later tasks)
-            Inline::FootnoteRef { .. } | Inline::Link { .. } | Inline::Image(_) => {}
+            Inline::Link { url, content, .. } => {
+                let rel_id = self.add_relationship(
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                    url,
+                );
+                write!(self.body_xml, "<w:hyperlink r:id=\"{rel_id}\">").unwrap();
+                let mut props = run_props.to_vec();
+                props.push("<w:rStyle w:val=\"Hyperlink\"/>");
+                self.write_inlines(content, &props);
+                self.body_xml.push_str("</w:hyperlink>");
+            }
+            Inline::FootnoteRef { id } => {
+                if let Some(&footnote_id) = self.footnote_id_map.get(id.as_str()) {
+                    self.body_xml
+                        .push_str("<w:r><w:rPr><w:rStyle w:val=\"FootnoteReference\"/></w:rPr>");
+                    write!(
+                        self.body_xml,
+                        "<w:footnoteReference w:id=\"{footnote_id}\"/>"
+                    )
+                    .unwrap();
+                    self.body_xml.push_str("</w:r>");
+                }
+            }
+            Inline::Image(image) => {
+                if let Some((rel_id, cx, cy)) = self.embed_image(&image.url) {
+                    let img_id = self.next_image_id - 1;
+                    self.write_image_drawing(&rel_id, &image.alt_text(), img_id, cx, cy);
+                } else {
+                    self.write_image_fallback(&image.url);
+                }
+            }
         }
     }
 
@@ -674,12 +884,20 @@ impl DocxBuilder {
         }
 
         for rel in &self.relationships {
-            xml.push_str(&format!(
-                "<Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"/>\n",
+            let external = if rel.rel_type.contains("hyperlink") {
+                " TargetMode=\"External\""
+            } else {
+                ""
+            };
+            writeln!(
+                xml,
+                "<Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"{}/>",
                 xml_escape(&rel.id),
                 xml_escape(&rel.rel_type),
                 xml_escape(&rel.target),
-            ));
+                external,
+            )
+            .unwrap();
         }
 
         xml.push_str("</Relationships>");
@@ -823,6 +1041,8 @@ impl Writer for DocxWriter {
 
     fn write_bytes(&self, doc: &Document, _opts: &WriteOptions) -> Result<Vec<u8>> {
         let mut builder = DocxBuilder::new();
+        // First pass: collect footnote definitions
+        builder.collect_footnotes(&doc.content);
         builder.write_metadata(&doc.metadata);
         builder.write_blocks(&doc.content);
         builder.numbering_xml = builder.build_numbering_xml();
@@ -835,14 +1055,19 @@ mod tests {
     use super::*;
     use std::io::{Cursor, Read as _};
 
-    /// Extract word/document.xml from a DOCX byte buffer.
-    fn extract_document_xml(bytes: &[u8]) -> String {
+    /// Extract any file from DOCX bytes by path within the ZIP.
+    fn extract_zip_file(bytes: &[u8], name: &str) -> String {
         let cursor = Cursor::new(bytes);
         let mut archive = zip::ZipArchive::new(cursor).unwrap();
-        let mut file = archive.by_name("word/document.xml").unwrap();
+        let mut file = archive.by_name(name).unwrap();
         let mut contents = String::new();
         file.read_to_string(&mut contents).unwrap();
         contents
+    }
+
+    /// Extract word/document.xml from a DOCX byte buffer.
+    fn extract_document_xml(bytes: &[u8]) -> String {
+        extract_zip_file(bytes, "word/document.xml")
     }
 
     #[test]
@@ -1368,6 +1593,218 @@ mod tests {
             xml.contains("<w:t>Alpha</w:t>"),
             "missing Alpha text, got:\n{xml}"
         );
+    }
+
+    #[test]
+    fn hyperlink_creates_relationship() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Link {
+                    url: "https://example.com".into(),
+                    title: None,
+                    content: vec![Inline::Text {
+                        value: "click".into(),
+                    }],
+                    attrs: None,
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        assert!(
+            xml.contains("<w:hyperlink"),
+            "missing w:hyperlink element, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>click</w:t>"),
+            "missing hyperlink text, got:\n{xml}"
+        );
+
+        let rels = extract_zip_file(&bytes, "word/_rels/document.xml.rels");
+        assert!(
+            rels.contains("https://example.com"),
+            "missing hyperlink in rels, got:\n{rels}"
+        );
+    }
+
+    #[test]
+    fn footnotes_create_footnotes_xml() {
+        let doc = Document {
+            content: vec![
+                Block::Paragraph {
+                    content: vec![
+                        Inline::Text {
+                            value: "Text".into(),
+                        },
+                        Inline::FootnoteRef { id: "1".into() },
+                    ],
+                },
+                Block::FootnoteDef {
+                    id: "1".into(),
+                    content: vec![Block::Paragraph {
+                        content: vec![Inline::Text {
+                            value: "A footnote".into(),
+                        }],
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+
+        let footnotes_xml = extract_zip_file(&bytes, "word/footnotes.xml");
+        assert!(
+            footnotes_xml.contains("<w:t>A footnote</w:t>"),
+            "missing footnote content, got:\n{footnotes_xml}"
+        );
+
+        let doc_xml = extract_document_xml(&bytes);
+        assert!(
+            doc_xml.contains("<w:footnoteReference"),
+            "missing footnoteReference, got:\n{doc_xml}"
+        );
+    }
+
+    #[test]
+    fn admonition_renders_with_border() {
+        let doc = Document {
+            content: vec![Block::Admonition {
+                kind: docmux_ast::AdmonitionKind::Note,
+                title: Some(vec![Inline::Text {
+                    value: "Note".into(),
+                }]),
+                content: vec![Block::Paragraph {
+                    content: vec![Inline::Text {
+                        value: "Important info".into(),
+                    }],
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        assert!(xml.contains("<w:b/>"), "missing bold title, got:\n{xml}");
+        assert!(
+            xml.contains("<w:t>Note</w:t>"),
+            "missing Note title, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Important info</w:t>"),
+            "missing content, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:pBdr>"),
+            "missing border element, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn definition_list_renders() {
+        let doc = Document {
+            content: vec![Block::DefinitionList {
+                items: vec![docmux_ast::DefinitionItem {
+                    term: vec![Inline::Text {
+                        value: "Term".into(),
+                    }],
+                    definitions: vec![vec![Block::Paragraph {
+                        content: vec![Inline::Text {
+                            value: "Definition".into(),
+                        }],
+                    }]],
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        assert!(xml.contains("<w:b/>"), "missing bold term, got:\n{xml}");
+        assert!(
+            xml.contains("<w:t>Term</w:t>"),
+            "missing term text, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Definition</w:t>"),
+            "missing definition text, got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn image_embeds_local_file() {
+        // Create a tiny 1x1 PNG for testing
+        let tmp_dir = std::env::temp_dir().join("docmux-docx-test");
+        std::fs::create_dir_all(&tmp_dir).ok();
+        let img_path = tmp_dir.join("test.png");
+
+        // Minimal valid PNG (1x1 red pixel)
+        let png_bytes: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
+            0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, // RGB
+            0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, // IDAT chunk
+            0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21,
+            0xBC, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND chunk
+            0xAE, 0x42, 0x60, 0x82,
+        ];
+        std::fs::write(&img_path, png_bytes).unwrap();
+
+        let doc = Document {
+            content: vec![Block::Figure {
+                image: docmux_ast::Image {
+                    url: img_path.to_str().unwrap().into(),
+                    alt: vec![Inline::Text {
+                        value: "A test image".into(),
+                    }],
+                    title: None,
+                    attrs: None,
+                },
+                caption: Some(vec![Inline::Text {
+                    value: "Figure 1".into(),
+                }]),
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+
+        // Verify image is in ZIP
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut found_image = false;
+        for i in 0..archive.len() {
+            let file = archive.by_index(i).unwrap();
+            if file.name().starts_with("word/media/") {
+                found_image = true;
+            }
+        }
+        assert!(found_image, "Image should be embedded in word/media/");
+
+        let xml = extract_document_xml(&bytes);
+        assert!(
+            xml.contains("<w:drawing>") || xml.contains("<wp:inline"),
+            "missing drawing element, got:\n{xml}"
+        );
+        assert!(
+            xml.contains("<w:t>Figure 1</w:t>"),
+            "missing caption, got:\n{xml}"
+        );
+
+        let _ = std::fs::remove_file(&img_path);
     }
 
     #[test]

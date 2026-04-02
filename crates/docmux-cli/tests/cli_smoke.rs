@@ -322,3 +322,48 @@ fn help_flag() {
     assert!(stdout.contains("--from"));
     assert!(stdout.contains("--to"));
 }
+
+#[test]
+fn converts_markdown_to_docx_file() {
+    let input = fixtures_dir().join("basic/paragraph.md");
+    let tmp_dir = std::env::temp_dir().join("docmux-test");
+    std::fs::create_dir_all(&tmp_dir).ok();
+    let output_file = tmp_dir.join("paragraph.docx");
+    let _ = std::fs::remove_file(&output_file);
+
+    let output = Command::new(docmux_bin())
+        .args([input.to_str().unwrap(), "-o", output_file.to_str().unwrap()])
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(
+        output.status.success(),
+        "docmux exited with error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output_file.exists(), "output file should exist");
+
+    // Verify it's a valid ZIP
+    let bytes = std::fs::read(&output_file).unwrap();
+    let cursor = std::io::Cursor::new(&bytes);
+    let archive = zip::ZipArchive::new(cursor);
+    assert!(archive.is_ok(), "output should be a valid ZIP file");
+
+    let _ = std::fs::remove_file(&output_file);
+}
+
+#[test]
+fn docx_to_stdout_errors() {
+    let input = fixtures_dir().join("basic/paragraph.md");
+    let output = Command::new(docmux_bin())
+        .args([input.to_str().unwrap(), "-t", "docx"])
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(!output.status.success(), "docx to stdout should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("requires -o FILE") || stderr.contains("binary format"),
+        "expected binary format error, got: {stderr}"
+    );
+}

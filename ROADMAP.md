@@ -98,7 +98,7 @@
 - [x] `docmux-writer-markdown` — CommonMark/GFM roundtrip, normalization (28 tests)
 - [x] `docmux-writer-plaintext` — stripped text output (29 tests)
 - [x] `docmux-reader-html` — HTML reader with scraper/html5ever (29 tests)
-- [ ] DOCX writer — OOXML output via zip + XML generation
+- [x] `docmux-writer-docx` — OOXML output via zip + XML generation (20 unit + 1 integration test)
 
 ### Template system
 

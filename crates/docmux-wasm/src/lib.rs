@@ -12,6 +12,7 @@ use docmux_reader_typst::TypstReader;
 use docmux_transform_crossref::CrossRefTransform;
 use docmux_transform_number_sections::NumberSectionsTransform;
 use docmux_transform_toc::TocTransform;
+use docmux_writer_docx::DocxWriter;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
@@ -33,6 +34,7 @@ fn build_registry() -> Registry {
     reg.add_writer(Box::new(TypstWriter::new()));
     reg.add_writer(Box::new(MarkdownWriter::new()));
     reg.add_writer(Box::new(PlaintextWriter::new()));
+    reg.add_writer(Box::new(DocxWriter::new()));
 
     reg
 }

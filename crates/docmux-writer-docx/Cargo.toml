@@ -11,3 +11,7 @@ rust-version.workspace = true
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
 zip = { workspace = true }
+
+[dev-dependencies]
+zip = { workspace = true }
+docmux-reader-markdown = { workspace = true }

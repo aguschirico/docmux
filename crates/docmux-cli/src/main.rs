@@ -12,6 +12,7 @@ use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
 use docmux_transform_number_sections::NumberSectionsTransform;
 use docmux_transform_toc::TocTransform;
+use docmux_writer_docx::DocxWriter;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
@@ -138,6 +139,7 @@ fn build_registry() -> Registry {
     reg.add_writer(Box::new(MarkdownWriter::new()));
     reg.add_writer(Box::new(PlaintextWriter::new()));
     reg.add_writer(Box::new(TypstWriter::new()));
+    reg.add_writer(Box::new(DocxWriter::new()));
     reg
 }
 
@@ -351,6 +353,45 @@ fn main() {
         highlight_style: cli.highlight_style.clone(),
         ..Default::default()
     };
+
+    // Binary formats (e.g. DOCX) use write_bytes and require -o FILE
+    if writer.default_extension() == "docx" {
+        let bytes = match writer.write_bytes(&doc, &opts) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("docmux: write error: {e}");
+                std::process::exit(1);
+            }
+        };
+        match &cli.output {
+            Some(path) if path.to_str() != Some("-") => {
+                if let Err(e) = std::fs::write(path, &bytes) {
+                    eprintln!("docmux: error writing {}: {e}", path.display());
+                    std::process::exit(1);
+                }
+                if !cli.quiet {
+                    let first_input = cli
+                        .input
+                        .first()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "-".into());
+                    eprintln!(
+                        "docmux: {} -> {} ({} bytes)",
+                        first_input,
+                        path.display(),
+                        bytes.len()
+                    );
+                }
+            }
+            _ => {
+                eprintln!(
+                    "docmux: DOCX output requires -o FILE (binary format cannot be written to stdout)"
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
 
     let output = match writer.write(&doc, &opts) {
         Ok(o) => o,
