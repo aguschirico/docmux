@@ -2,6 +2,7 @@
 //!
 //! HTML5 writer for docmux. Converts the docmux AST into semantic HTML.
 
+use base64::Engine;
 use docmux_ast::*;
 use docmux_core::{MathEngine, Result, WriteOptions, Writer};
 
@@ -14,17 +15,23 @@ impl HtmlWriter {
         Self
     }
 
-    fn write_blocks(&self, blocks: &[Block], opts: &WriteOptions, out: &mut String) {
+    fn write_blocks(
+        &self,
+        blocks: &[Block],
+        opts: &WriteOptions,
+        doc: &Document,
+        out: &mut String,
+    ) {
         for block in blocks {
-            self.write_block(block, opts, out);
+            self.write_block(block, opts, doc, out);
         }
     }
 
-    fn write_block(&self, block: &Block, opts: &WriteOptions, out: &mut String) {
+    fn write_block(&self, block: &Block, opts: &WriteOptions, doc: &Document, out: &mut String) {
         match block {
             Block::Paragraph { content } => {
                 out.push_str("<p>");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</p>\n");
             }
             Block::Heading {
@@ -36,7 +43,7 @@ impl HtmlWriter {
                 } else {
                     out.push_str(&format!("<{tag}>"));
                 }
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str(&format!("</{tag}>\n"));
             }
             Block::CodeBlock {
@@ -112,7 +119,7 @@ impl HtmlWriter {
             }
             Block::BlockQuote { content } => {
                 out.push_str("<blockquote>\n");
-                self.write_blocks(content, opts, out);
+                self.write_blocks(content, opts, doc, out);
                 out.push_str("</blockquote>\n");
             }
             Block::List {
@@ -145,7 +152,7 @@ impl HtmlWriter {
                     } else {
                         out.push_str("<li>");
                     }
-                    self.write_blocks(&item.content, opts, out);
+                    self.write_blocks(&item.content, opts, doc, out);
                     out.push_str("</li>\n");
                 }
                 if *ordered {
@@ -155,7 +162,7 @@ impl HtmlWriter {
                 }
             }
             Block::Table(table) => {
-                self.write_table(table, opts, out);
+                self.write_table(table, opts, doc, out);
             }
             Block::Figure {
                 image,
@@ -168,14 +175,15 @@ impl HtmlWriter {
                 } else {
                     out.push_str("<figure>");
                 }
+                let src = image_src(&image.url, doc);
                 out.push_str(&format!(
                     "<img src=\"{}\" alt=\"{}\">",
-                    escape_attr(&image.url),
+                    escape_attr(&src),
                     escape_attr(&image.alt_text())
                 ));
                 if let Some(cap) = caption {
                     out.push_str("<figcaption>");
-                    self.write_inlines(cap, opts, out);
+                    self.write_inlines(cap, opts, doc, out);
                     out.push_str("</figcaption>");
                 }
                 out.push_str("</figure>\n");
@@ -205,10 +213,10 @@ impl HtmlWriter {
                         out.push_str(&format!("<aside class=\"admonition {}\">", escape_attr(c)));
                         if let Some(t) = title {
                             out.push_str("<p class=\"admonition-title\">");
-                            self.write_inlines(t, opts, out);
+                            self.write_inlines(t, opts, doc, out);
                             out.push_str("</p>");
                         }
-                        self.write_blocks(content, opts, out);
+                        self.write_blocks(content, opts, doc, out);
                         out.push_str("</aside>\n");
                         return;
                     }
@@ -216,21 +224,21 @@ impl HtmlWriter {
                 out.push_str(&format!("<aside class=\"{class}\">"));
                 if let Some(t) = title {
                     out.push_str("<p class=\"admonition-title\">");
-                    self.write_inlines(t, opts, out);
+                    self.write_inlines(t, opts, doc, out);
                     out.push_str("</p>");
                 }
-                self.write_blocks(content, opts, out);
+                self.write_blocks(content, opts, doc, out);
                 out.push_str("</aside>\n");
             }
             Block::DefinitionList { items } => {
                 out.push_str("<dl>\n");
                 for item in items {
                     out.push_str("<dt>");
-                    self.write_inlines(&item.term, opts, out);
+                    self.write_inlines(&item.term, opts, doc, out);
                     out.push_str("</dt>\n");
                     for def in &item.definitions {
                         out.push_str("<dd>");
-                        self.write_blocks(def, opts, out);
+                        self.write_blocks(def, opts, doc, out);
                         out.push_str("</dd>\n");
                     }
                 }
@@ -248,7 +256,7 @@ impl HtmlWriter {
                     attr_str.push_str(&format!(" data-{}=\"{}\"", escape_attr(k), escape_attr(v)));
                 }
                 out.push_str(&format!("<div{attr_str}>\n"));
-                self.write_blocks(content, opts, out);
+                self.write_blocks(content, opts, doc, out);
                 out.push_str("</div>\n");
             }
             Block::FootnoteDef { id, content } => {
@@ -256,13 +264,13 @@ impl HtmlWriter {
                     "<aside id=\"fn-{}\" class=\"footnote\" role=\"note\">\n",
                     escape_attr(id)
                 ));
-                self.write_blocks(content, opts, out);
+                self.write_blocks(content, opts, doc, out);
                 out.push_str("</aside>\n");
             }
         }
     }
 
-    fn write_table(&self, table: &Table, opts: &WriteOptions, out: &mut String) {
+    fn write_table(&self, table: &Table, opts: &WriteOptions, doc: &Document, out: &mut String) {
         if let Some(label) = &table.label {
             out.push_str(&format!("<table id=\"{}\">\n", escape_attr(label)));
         } else {
@@ -271,7 +279,7 @@ impl HtmlWriter {
 
         if let Some(cap) = &table.caption {
             out.push_str("<caption>");
-            self.write_inlines(cap, opts, out);
+            self.write_inlines(cap, opts, doc, out);
             out.push_str("</caption>\n");
         }
 
@@ -283,7 +291,7 @@ impl HtmlWriter {
                     .get(i)
                     .map(|c| &c.alignment)
                     .unwrap_or(&Alignment::Default);
-                self.write_th(cell, align, opts, out);
+                self.write_th(cell, align, opts, doc, out);
             }
             out.push_str("</tr>\n</thead>\n");
         }
@@ -297,7 +305,7 @@ impl HtmlWriter {
                     .get(i)
                     .map(|c| &c.alignment)
                     .unwrap_or(&Alignment::Default);
-                self.write_td(cell, align, opts, out);
+                self.write_td(cell, align, opts, doc, out);
             }
             out.push_str("</tr>\n");
         }
@@ -311,7 +319,7 @@ impl HtmlWriter {
                     .get(i)
                     .map(|c| &c.alignment)
                     .unwrap_or(&Alignment::Default);
-                self.write_td(cell, align, opts, out);
+                self.write_td(cell, align, opts, doc, out);
             }
             out.push_str("</tr>\n</tfoot>\n");
         }
@@ -319,7 +327,14 @@ impl HtmlWriter {
         out.push_str("</table>\n");
     }
 
-    fn write_th(&self, cell: &TableCell, align: &Alignment, opts: &WriteOptions, out: &mut String) {
+    fn write_th(
+        &self,
+        cell: &TableCell,
+        align: &Alignment,
+        opts: &WriteOptions,
+        doc: &Document,
+        out: &mut String,
+    ) {
         let mut attrs = String::new();
         if cell.colspan > 1 {
             attrs.push_str(&format!(" colspan=\"{}\"", cell.colspan));
@@ -331,11 +346,18 @@ impl HtmlWriter {
             attrs.push_str(&format!(" style=\"text-align: {}\"", alignment_css(align)));
         }
         out.push_str(&format!("<th{attrs}>"));
-        self.write_blocks(&cell.content, opts, out);
+        self.write_blocks(&cell.content, opts, doc, out);
         out.push_str("</th>");
     }
 
-    fn write_td(&self, cell: &TableCell, align: &Alignment, opts: &WriteOptions, out: &mut String) {
+    fn write_td(
+        &self,
+        cell: &TableCell,
+        align: &Alignment,
+        opts: &WriteOptions,
+        doc: &Document,
+        out: &mut String,
+    ) {
         let mut attrs = String::new();
         if cell.colspan > 1 {
             attrs.push_str(&format!(" colspan=\"{}\"", cell.colspan));
@@ -347,34 +369,40 @@ impl HtmlWriter {
             attrs.push_str(&format!(" style=\"text-align: {}\"", alignment_css(align)));
         }
         out.push_str(&format!("<td{attrs}>"));
-        self.write_blocks(&cell.content, opts, out);
+        self.write_blocks(&cell.content, opts, doc, out);
         out.push_str("</td>");
     }
 
-    fn write_inlines(&self, inlines: &[Inline], opts: &WriteOptions, out: &mut String) {
+    fn write_inlines(
+        &self,
+        inlines: &[Inline],
+        opts: &WriteOptions,
+        doc: &Document,
+        out: &mut String,
+    ) {
         for inline in inlines {
-            self.write_inline(inline, opts, out);
+            self.write_inline(inline, opts, doc, out);
         }
     }
 
-    fn write_inline(&self, inline: &Inline, opts: &WriteOptions, out: &mut String) {
+    fn write_inline(&self, inline: &Inline, opts: &WriteOptions, doc: &Document, out: &mut String) {
         match inline {
             Inline::Text { value } => {
                 out.push_str(&escape_html(value));
             }
             Inline::Emphasis { content } => {
                 out.push_str("<em>");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</em>");
             }
             Inline::Strong { content } => {
                 out.push_str("<strong>");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</strong>");
             }
             Inline::Strikethrough { content } => {
                 out.push_str("<del>");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</del>");
             }
             Inline::Code { value, .. } => {
@@ -403,13 +431,14 @@ impl HtmlWriter {
                     out.push_str(&format!(" title=\"{}\"", escape_attr(t)));
                 }
                 out.push('>');
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</a>");
             }
             Inline::Image(img) => {
+                let src = image_src(&img.url, doc);
                 out.push_str(&format!(
                     "<img src=\"{}\" alt=\"{}\"",
-                    escape_attr(&img.url),
+                    escape_attr(&src),
                     escape_attr(&img.alt_text())
                 ));
                 if let Some(t) = &img.title {
@@ -444,17 +473,17 @@ impl HtmlWriter {
             }
             Inline::Superscript { content } => {
                 out.push_str("<sup>");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</sup>");
             }
             Inline::Subscript { content } => {
                 out.push_str("<sub>");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</sub>");
             }
             Inline::SmallCaps { content } => {
                 out.push_str("<span style=\"font-variant: small-caps\">");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</span>");
             }
             Inline::SoftBreak => {
@@ -465,7 +494,7 @@ impl HtmlWriter {
             }
             Inline::Underline { content } => {
                 out.push_str("<u>");
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</u>");
             }
             Inline::Quoted {
@@ -477,7 +506,7 @@ impl HtmlWriter {
                     QuoteType::DoubleQuote => ("&ldquo;", "&rdquo;"),
                 };
                 out.push_str(open);
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str(close);
             }
             Inline::Span { content, attrs } => {
@@ -492,7 +521,7 @@ impl HtmlWriter {
                     attr_str.push_str(&format!(" data-{}=\"{}\"", escape_attr(k), escape_attr(v)));
                 }
                 out.push_str(&format!("<span{attr_str}>"));
-                self.write_inlines(content, opts, out);
+                self.write_inlines(content, opts, doc, out);
                 out.push_str("</span>");
             }
         }
@@ -543,7 +572,7 @@ impl Writer for HtmlWriter {
 
     fn write(&self, doc: &Document, opts: &WriteOptions) -> Result<String> {
         let mut body = String::with_capacity(4096);
-        self.write_blocks(&doc.content, opts, &mut body);
+        self.write_blocks(&doc.content, opts, doc, &mut body);
 
         if opts.standalone {
             Ok(self.wrap_standalone(&body, doc, opts))
@@ -554,6 +583,16 @@ impl Writer for HtmlWriter {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+fn image_src(url: &str, doc: &Document) -> String {
+    if let Some(res) = doc.resources.get(url) {
+        if !res.data.is_empty() {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&res.data);
+            return format!("data:{};base64,{}", res.mime_type, b64);
+        }
+    }
+    url.to_string()
+}
 
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -728,6 +767,66 @@ mod tests {
         assert!(
             html.contains("<pre><code"),
             "expected plain fallback with <pre><code, got: {html}"
+        );
+    }
+
+    #[test]
+    fn image_with_resource_renders_data_uri() {
+        use std::collections::HashMap;
+
+        let png_bytes = b"\x89PNG\r\n\x1a\nfake";
+        let expected_b64 = base64::engine::general_purpose::STANDARD.encode(png_bytes);
+
+        let doc = Document {
+            resources: HashMap::from([(
+                "media/image1.png".to_string(),
+                ResourceData {
+                    mime_type: "image/png".to_string(),
+                    data: png_bytes.to_vec(),
+                },
+            )]),
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Image(docmux_ast::Image {
+                    url: "media/image1.png".to_string(),
+                    alt: vec![Inline::Text {
+                        value: "A logo".to_string(),
+                    }],
+                    title: None,
+                    attrs: None,
+                })],
+            }],
+            ..Default::default()
+        };
+
+        let writer = HtmlWriter::new();
+        let output = writer.write(&doc, &WriteOptions::default()).unwrap();
+        let expected_src = format!("data:image/png;base64,{expected_b64}");
+        assert!(
+            output.contains(&expected_src),
+            "output should contain data URI, got: {output}"
+        );
+        assert!(output.contains("alt=\"A logo\""));
+    }
+
+    #[test]
+    fn image_without_resource_renders_path() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Image(docmux_ast::Image {
+                    url: "images/photo.jpg".to_string(),
+                    alt: vec![],
+                    title: None,
+                    attrs: None,
+                })],
+            }],
+            ..Default::default()
+        };
+
+        let writer = HtmlWriter::new();
+        let output = writer.write(&doc, &WriteOptions::default()).unwrap();
+        assert!(
+            output.contains("src=\"images/photo.jpg\""),
+            "should use path as-is, got: {output}"
         );
     }
 }

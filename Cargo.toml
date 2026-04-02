@@ -67,6 +67,7 @@ scraper = "0.22"
 syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
+base64 = "0.22"
 
 [profile.release]
 lto = true
