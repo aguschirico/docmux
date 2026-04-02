@@ -11,7 +11,7 @@ pub(crate) mod relationships;
 pub(crate) mod styles;
 
 use archive::DocxArchive;
-use docmux_ast::{Block, Document};
+use docmux_ast::{Block, Document, ResourceData};
 use docmux_core::{BinaryReader, Result as CoreResult};
 use std::collections::HashMap;
 
@@ -33,6 +33,23 @@ pub(crate) enum DocxError {
 impl From<DocxError> for docmux_core::ConvertError {
     fn from(e: DocxError) -> Self {
         docmux_core::ConvertError::Other(e.to_string())
+    }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Infer MIME type from file extension.
+fn mime_from_path(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or("") {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        "tiff" | "tif" => "image/tiff",
+        "wmf" => "image/x-wmf",
+        "emf" => "image/x-emf",
+        _ => "application/octet-stream",
     }
 }
 
@@ -106,6 +123,22 @@ impl BinaryReader for DocxReader {
             docmux_ast::Metadata::default()
         };
 
+        // 5b. Load embedded media resources
+        let mut resources: HashMap<String, ResourceData> = HashMap::new();
+        for full_path in archive.media_paths() {
+            if let Some(bytes) = archive.get_bytes(full_path) {
+                // Strip "word/" prefix → "media/image1.png"
+                let key = full_path.strip_prefix("word/").unwrap_or(full_path);
+                resources.insert(
+                    key.to_string(),
+                    ResourceData {
+                        mime_type: mime_from_path(full_path).to_string(),
+                        data: bytes.to_vec(),
+                    },
+                );
+            }
+        }
+
         // 6. Parse document body (required)
         let doc_xml = archive
             .get_xml("word/document.xml")
@@ -133,7 +166,7 @@ impl BinaryReader for DocxReader {
             content,
             bibliography: None,
             warnings: vec![],
-            resources: HashMap::new(),
+            resources,
         })
     }
 }
@@ -263,6 +296,31 @@ mod tests {
             .iter()
             .any(|b| matches!(b, Block::FootnoteDef { .. }));
         assert!(has_footnote_def);
+    }
+
+    #[test]
+    fn read_docx_loads_media_resources() {
+        let doc_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Has image</w:t></w:r></w:p></w:body>
+</w:document>"#;
+
+        let fake_png = b"\x89PNG\r\n\x1a\nfake image data";
+        let zip_bytes = make_zip(&[
+            ("word/document.xml", doc_xml.as_bytes()),
+            ("word/media/image1.png", fake_png),
+        ]);
+
+        let reader = DocxReader;
+        let doc = reader.read_bytes(&zip_bytes).unwrap();
+        assert_eq!(doc.resources.len(), 1);
+
+        let res = doc
+            .resources
+            .get("media/image1.png")
+            .expect("resource should exist");
+        assert_eq!(res.mime_type, "image/png");
+        assert_eq!(res.data, fake_png);
     }
 
     #[test]
