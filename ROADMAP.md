@@ -125,7 +125,7 @@
 
 ### Readers & writers
 
-- [ ] DOCX reader
+- [x] DOCX reader (43 tests, BinaryReader trait, style classifier, CLI + WASM integration)
 - [ ] EPUB reader + writer
 - [ ] reStructuredText reader + writer
 - [ ] AsciiDoc reader

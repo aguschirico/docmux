@@ -56,12 +56,12 @@ Git pre-commit hook in `.githooks/pre-commit` (configured via `core.hooksPath`).
 
 See `ROADMAP.md` for full status. **Phase 1 ✅ · Phase 2 ✅ · Phase 3 in progress.**
 
-### Crates (21 total, 290+ tests)
+### Crates (22 total, 330+ tests)
 
 | Category | Crates |
 |----------|--------|
 | Core | `docmux-ast`, `docmux-core` |
-| Readers | `docmux-reader-markdown` (15), `docmux-reader-latex` (53), `docmux-reader-typst` (81), `docmux-reader-myst` (15), `docmux-reader-html` (29) |
+| Readers | `docmux-reader-markdown` (15), `docmux-reader-latex` (53), `docmux-reader-typst` (81), `docmux-reader-myst` (15), `docmux-reader-html` (29), `docmux-reader-docx` (43) |
 | Writers | `docmux-writer-html` (8), `docmux-writer-latex` (12), `docmux-writer-typst` (16), `docmux-writer-markdown` (28), `docmux-writer-plaintext` (29), `docmux-writer-docx` |
 | Transforms | `docmux-transform-crossref` (7), `docmux-transform-toc` (6), `docmux-transform-number-sections` (7), `docmux-transform-cite`, `docmux-transform-math` |
 | Highlight | `docmux-highlight` (8) |
@@ -73,7 +73,7 @@ Web-based document converter at `playground/`. Stack: React 19 + TypeScript 5.9 
 
 ### Next up
 
-`--template`, `--bibliography`, `--csl`, cite/math transforms, HTML reader, DOCX writer, syntax highlighting, npm package. Full gap analysis in `docs/pandoc-parity-check.md`.
+`--template`, `--bibliography`, `--csl`, cite/math transforms, DOCX reader enhancements (list assembly, image/drawing parsing), npm package. Full gap analysis in `docs/pandoc-parity-check.md`.
 
 ## Coding conventions
 
