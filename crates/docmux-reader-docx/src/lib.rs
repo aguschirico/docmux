@@ -332,6 +332,76 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn read_docx_with_inline_image() {
+        let doc_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:drawing>
+          <wp:inline>
+            <wp:docPr id="1" name="Test Image"/>
+            <a:graphic>
+              <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                <pic:pic>
+                  <pic:blipFill>
+                    <a:blip r:embed="rId5"/>
+                  </pic:blipFill>
+                </pic:pic>
+              </a:graphicData>
+            </a:graphic>
+          </wp:inline>
+        </w:drawing>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"#;
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId5"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    Target="media/image1.png"/>
+</Relationships>"#;
+
+        let fake_png = b"\x89PNG\r\n\x1a\nfake image bytes for test";
+        let zip_bytes = make_zip(&[
+            ("word/document.xml", doc_xml.as_bytes()),
+            ("word/_rels/document.xml.rels", rels_xml.as_bytes()),
+            ("word/media/image1.png", fake_png),
+        ]);
+
+        let reader = DocxReader;
+        let doc = reader.read_bytes(&zip_bytes).unwrap();
+
+        // Verify image inline
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            assert_eq!(content.len(), 1);
+            if let docmux_ast::Inline::Image(img) = &content[0] {
+                assert_eq!(img.url, "media/image1.png");
+                assert_eq!(img.alt_text(), "Test Image");
+            } else {
+                panic!("expected Image, got {:?}", content[0]);
+            }
+        } else {
+            panic!("expected Paragraph");
+        }
+
+        // Verify resource loaded
+        let res = doc
+            .resources
+            .get("media/image1.png")
+            .expect("resource should exist");
+        assert_eq!(res.mime_type, "image/png");
+        assert_eq!(res.data, fake_png);
+    }
+
     // ─── Roundtrip tests (markdown → DOCX bytes → AST) ──────────────────────
 
     fn roundtrip(markdown: &str) -> Document {
