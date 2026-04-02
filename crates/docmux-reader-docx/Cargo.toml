@@ -1,0 +1,19 @@
+[package]
+name = "docmux-reader-docx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DOCX reader for docmux — parses DOCX into the docmux AST"
+rust-version.workspace = true
+
+[dependencies]
+docmux-ast = { workspace = true }
+docmux-core = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+docmux-writer-docx = { workspace = true }
+docmux-reader-markdown = { workspace = true }
