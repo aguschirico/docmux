@@ -52,6 +52,20 @@ pub trait Reader: Send + Sync {
     fn read(&self, input: &str) -> Result<Document>;
 }
 
+// ─── BinaryReader trait ─────────────────────────────────────────────────────
+
+/// Parses binary input (e.g. a ZIP archive) into a [`Document`] AST.
+pub trait BinaryReader: Send + Sync {
+    /// A human-readable format name (e.g. `"docx"`).
+    fn format(&self) -> &str;
+
+    /// File extensions this reader handles (e.g. `["docx"]`).
+    fn extensions(&self) -> &[&str];
+
+    /// Parse binary `input` into a document AST.
+    fn read_bytes(&self, input: &[u8]) -> Result<Document>;
+}
+
 // ─── Writer trait ────────────────────────────────────────────────────────────
 
 /// Renders a [`Document`] AST into an output format.
@@ -230,6 +244,7 @@ impl Pipeline {
 #[derive(Default)]
 pub struct Registry {
     readers: Vec<Box<dyn Reader>>,
+    binary_readers: Vec<Box<dyn BinaryReader>>,
     writers: Vec<Box<dyn Writer>>,
 }
 
@@ -257,6 +272,25 @@ impl Registry {
             .map(|r| r.as_ref())
     }
 
+    /// Register a binary reader.
+    pub fn add_binary_reader(&mut self, reader: Box<dyn BinaryReader>) {
+        self.binary_readers.push(reader);
+    }
+
+    /// Look up a binary reader by format name or file extension.
+    pub fn find_binary_reader(&self, name_or_ext: &str) -> Option<&dyn BinaryReader> {
+        let needle = name_or_ext.trim_start_matches('.');
+        self.binary_readers
+            .iter()
+            .find(|r| r.format() == needle || r.extensions().contains(&needle))
+            .map(|r| r.as_ref())
+    }
+
+    /// List available binary reader format names.
+    pub fn binary_reader_formats(&self) -> Vec<&str> {
+        self.binary_readers.iter().map(|r| r.format()).collect()
+    }
+
     /// Look up a writer by format name or default extension.
     pub fn find_writer(&self, name_or_ext: &str) -> Option<&dyn Writer> {
         let needle = name_or_ext.trim_start_matches('.');
@@ -266,9 +300,13 @@ impl Registry {
             .map(|w| w.as_ref())
     }
 
-    /// List available reader format names.
+    /// List all available reader format names (text and binary).
     pub fn reader_formats(&self) -> Vec<&str> {
-        self.readers.iter().map(|r| r.format()).collect()
+        self.readers
+            .iter()
+            .map(|r| r.format())
+            .chain(self.binary_readers.iter().map(|r| r.format()))
+            .collect()
     }
 
     /// List available writer format names.
@@ -297,5 +335,39 @@ mod tests {
         assert!(reg.find_reader("markdown").is_none());
         assert!(reg.find_writer("html").is_none());
         assert!(reg.reader_formats().is_empty());
+    }
+
+    #[test]
+    fn binary_reader_trait_exists() {
+        // Verify BinaryReader is a usable trait with Send + Sync bounds
+        #[allow(dead_code)]
+        fn assert_binary_reader<T: super::BinaryReader + Send + Sync>() {}
+        // If this compiles, the trait exists with the right bounds
+    }
+
+    #[test]
+    fn registry_binary_reader() {
+        use super::*;
+
+        struct FakeBinaryReader;
+        impl BinaryReader for FakeBinaryReader {
+            fn format(&self) -> &str {
+                "fake"
+            }
+            fn extensions(&self) -> &[&str] {
+                &["fk"]
+            }
+            fn read_bytes(&self, _input: &[u8]) -> Result<Document> {
+                Ok(Document::default())
+            }
+        }
+
+        let mut reg = Registry::new();
+        assert!(reg.find_binary_reader("fake").is_none());
+
+        reg.add_binary_reader(Box::new(FakeBinaryReader));
+        assert!(reg.find_binary_reader("fake").is_some());
+        assert!(reg.find_binary_reader("fk").is_some());
+        assert!(reg.reader_formats().contains(&"fake"));
     }
 }
