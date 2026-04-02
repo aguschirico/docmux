@@ -4,6 +4,7 @@
 
 mod archive;
 pub(crate) mod footnotes;
+pub(crate) mod metadata;
 pub(crate) mod numbering;
 pub(crate) mod relationships;
 pub(crate) mod styles;
