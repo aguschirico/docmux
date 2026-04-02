@@ -149,6 +149,7 @@ impl BinaryReader for DocxReader {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
         };
 
         let mut content = document::parse_body(&doc_xml, &ctx)?;
@@ -179,7 +180,7 @@ mod tests {
     use std::io::Write as IoWrite;
     use zip::write::{FileOptions, ZipWriter};
 
-    fn make_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    pub(crate) fn make_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut buf = Vec::new();
         let cursor = std::io::Cursor::new(&mut buf);
         let mut zw = ZipWriter::new(cursor);

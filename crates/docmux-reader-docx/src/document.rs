@@ -4,7 +4,7 @@ use crate::numbering::NumberingMap;
 use crate::relationships::RelMap;
 use crate::styles::{StyleKind, StyleMap};
 use crate::DocxError;
-use docmux_ast::{Alignment, Block, ColumnSpec, Inline, Table, TableCell};
+use docmux_ast::{Alignment, Block, ColumnSpec, Image, Inline, Table, TableCell};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
@@ -17,6 +17,8 @@ pub(crate) struct ParseContext<'a> {
     #[allow(dead_code)]
     pub(crate) numbering: &'a NumberingMap,
     pub(crate) rels: &'a RelMap,
+    #[allow(dead_code)]
+    pub(crate) archive: &'a crate::archive::DocxArchive,
 }
 
 // ─── XML reconstruction helpers ─────────────────────────────────────────────
@@ -180,6 +182,76 @@ enum ElementKind {
     Other,
 }
 
+// ─── parse_drawing ──────────────────────────────────────────────────────────
+
+/// Extract an `Inline::Image` from a `<w:drawing>` element.
+///
+/// Handles both `<wp:inline>` and `<wp:anchor>` drawing types.
+/// Returns `None` if no image relationship can be resolved.
+fn parse_drawing(xml: &str, ctx: &ParseContext<'_>) -> Result<Option<Inline>, DocxError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    let mut alt_text = String::new();
+    let mut embed_rid: Option<String> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                let name = e.local_name();
+                match name.as_ref() {
+                    b"docPr" => {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.local_name().as_ref() == b"name" {
+                                alt_text = String::from_utf8_lossy(&attr.value).into_owned();
+                            }
+                        }
+                    }
+                    b"blip" => {
+                        for attr in e.attributes().flatten() {
+                            let key = attr.key.as_ref();
+                            if key == b"r:embed" || key.ends_with(b":embed") {
+                                embed_rid = Some(String::from_utf8_lossy(&attr.value).into_owned());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(e.to_string())),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let rid = match embed_rid {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let rel = match ctx.rels.get(&rid) {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    let url = rel.target.clone();
+
+    let alt = if alt_text.is_empty() {
+        vec![]
+    } else {
+        vec![Inline::Text { value: alt_text }]
+    };
+
+    Ok(Some(Inline::Image(Image {
+        url,
+        alt,
+        title: None,
+        attrs: None,
+    })))
+}
+
 // ─── parse_runs (inline runs) ───────────────────────────────────────────────
 
 /// Parse inline runs from paragraph XML content.
@@ -205,108 +277,185 @@ pub(crate) fn parse_runs(xml: &str, ctx: &ParseContext<'_>) -> Result<Vec<Inline
     let mut hyperlink_url = String::new();
     let mut hyperlink_inlines: Vec<Inline> = Vec::new();
 
+    // Drawing state
+    let mut in_drawing = false;
+    let mut drawing_xml = String::new();
+    let mut drawing_depth: u32 = 0;
+
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+            Ok(Event::Start(ref e)) => {
                 let local = e.local_name();
                 let name = local.as_ref();
 
-                match name {
-                    b"hyperlink" => {
-                        in_hyperlink = true;
-                        hyperlink_url.clear();
-                        hyperlink_inlines.clear();
+                if in_drawing {
+                    drawing_depth += 1;
+                    append_start_tag(&mut drawing_xml, e);
+                } else {
+                    match name {
+                        b"hyperlink" => {
+                            in_hyperlink = true;
+                            hyperlink_url.clear();
+                            hyperlink_inlines.clear();
 
-                        // Look for r:id attribute
-                        for attr in e.attributes().flatten() {
-                            let key = attr.key.as_ref();
-                            // r:id or w:id — the relationship id
-                            if key == b"r:id" || key.ends_with(b":id") && !key.ends_with(b"w:id") {
-                                let rid = String::from_utf8_lossy(&attr.value).into_owned();
-                                if let Some(rel) = ctx.rels.get(&rid) {
-                                    hyperlink_url = rel.target.clone();
+                            // Look for r:id attribute
+                            for attr in e.attributes().flatten() {
+                                let key = attr.key.as_ref();
+                                // r:id or w:id — the relationship id
+                                if key == b"r:id"
+                                    || key.ends_with(b":id") && !key.ends_with(b"w:id")
+                                {
+                                    let rid = String::from_utf8_lossy(&attr.value).into_owned();
+                                    if let Some(rel) = ctx.rels.get(&rid) {
+                                        hyperlink_url = rel.target.clone();
+                                    }
                                 }
                             }
                         }
-                    }
-                    b"r" => {
-                        in_run = true;
-                        // Reset run properties
-                        fmt = RunFormat::default();
-                        code_font = false;
-                    }
-                    b"rPr" if in_run => {
-                        in_rpr = true;
-                    }
-                    b"b" if in_rpr => {
-                        fmt.bold = !is_val_false(e);
-                    }
-                    b"i" if in_rpr => {
-                        fmt.italic = !is_val_false(e);
-                    }
-                    b"strike" if in_rpr => {
-                        fmt.strike = !is_val_false(e);
-                    }
-                    b"u" if in_rpr => {
-                        let val = get_val_attr(e);
-                        fmt.underline = val.as_deref() != Some("none");
-                    }
-                    b"vertAlign" if in_rpr => {
-                        let val = get_val_attr(e);
-                        match val.as_deref() {
-                            Some("superscript") => fmt.superscript = true,
-                            Some("subscript") => fmt.subscript = true,
-                            _ => {}
+                        b"r" => {
+                            in_run = true;
+                            // Reset run properties
+                            fmt = RunFormat::default();
+                            code_font = false;
                         }
-                    }
-                    b"smallCaps" if in_rpr => {
-                        fmt.small_caps = !is_val_false(e);
-                    }
-                    b"rFonts" if in_rpr => {
-                        // Check if font is monospace
-                        for attr in e.attributes().flatten() {
-                            let key_local = attr.key.local_name();
-                            if key_local.as_ref() == b"ascii"
-                                || key_local.as_ref() == b"hAnsi"
-                                || key_local.as_ref() == b"cs"
-                            {
-                                let font_name = String::from_utf8_lossy(&attr.value);
-                                if is_monospace_font(&font_name) {
-                                    code_font = true;
+                        b"drawing" if in_run => {
+                            in_drawing = true;
+                            drawing_xml.clear();
+                            drawing_depth = 0;
+                            append_start_tag(&mut drawing_xml, e);
+                        }
+                        b"rPr" if in_run => {
+                            in_rpr = true;
+                        }
+                        b"b" if in_rpr => {
+                            fmt.bold = !is_val_false(e);
+                        }
+                        b"i" if in_rpr => {
+                            fmt.italic = !is_val_false(e);
+                        }
+                        b"strike" if in_rpr => {
+                            fmt.strike = !is_val_false(e);
+                        }
+                        b"u" if in_rpr => {
+                            let val = get_val_attr(e);
+                            fmt.underline = val.as_deref() != Some("none");
+                        }
+                        b"vertAlign" if in_rpr => {
+                            let val = get_val_attr(e);
+                            match val.as_deref() {
+                                Some("superscript") => fmt.superscript = true,
+                                Some("subscript") => fmt.subscript = true,
+                                _ => {}
+                            }
+                        }
+                        b"smallCaps" if in_rpr => {
+                            fmt.small_caps = !is_val_false(e);
+                        }
+                        b"rFonts" if in_rpr => {
+                            // Check if font is monospace
+                            for attr in e.attributes().flatten() {
+                                let key_local = attr.key.local_name();
+                                if key_local.as_ref() == b"ascii"
+                                    || key_local.as_ref() == b"hAnsi"
+                                    || key_local.as_ref() == b"cs"
+                                {
+                                    let font_name = String::from_utf8_lossy(&attr.value);
+                                    if is_monospace_font(&font_name) {
+                                        code_font = true;
+                                    }
                                 }
                             }
                         }
-                    }
-                    b"t" if in_run => {
-                        in_t = true;
-                    }
-                    b"br" if in_run => {
-                        let inline = Inline::HardBreak;
-                        if in_hyperlink {
-                            hyperlink_inlines.push(inline);
-                        } else {
-                            inlines.push(inline);
+                        b"t" if in_run => {
+                            in_t = true;
                         }
+                        _ => {}
                     }
-                    b"footnoteReference" if in_run => {
-                        // <w:footnoteReference w:id="N"/>
-                        for attr in e.attributes().flatten() {
-                            if attr.key.local_name().as_ref() == b"id" {
-                                let id = String::from_utf8_lossy(&attr.value).into_owned();
-                                let inline = Inline::FootnoteRef { id };
-                                if in_hyperlink {
-                                    hyperlink_inlines.push(inline);
-                                } else {
-                                    inlines.push(inline);
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let local = e.local_name();
+                let name = local.as_ref();
+
+                if in_drawing {
+                    append_empty_tag(&mut drawing_xml, e);
+                } else {
+                    match name {
+                        // Inline formatting attributes — always empty elements in OOXML
+                        b"rPr" if in_run => {
+                            in_rpr = true;
+                        }
+                        b"b" if in_rpr => {
+                            fmt.bold = !is_val_false(e);
+                        }
+                        b"i" if in_rpr => {
+                            fmt.italic = !is_val_false(e);
+                        }
+                        b"strike" if in_rpr => {
+                            fmt.strike = !is_val_false(e);
+                        }
+                        b"u" if in_rpr => {
+                            let val = get_val_attr(e);
+                            fmt.underline = val.as_deref() != Some("none");
+                        }
+                        b"vertAlign" if in_rpr => {
+                            let val = get_val_attr(e);
+                            match val.as_deref() {
+                                Some("superscript") => fmt.superscript = true,
+                                Some("subscript") => fmt.subscript = true,
+                                _ => {}
+                            }
+                        }
+                        b"smallCaps" if in_rpr => {
+                            fmt.small_caps = !is_val_false(e);
+                        }
+                        b"rFonts" if in_rpr => {
+                            for attr in e.attributes().flatten() {
+                                let key_local = attr.key.local_name();
+                                if key_local.as_ref() == b"ascii"
+                                    || key_local.as_ref() == b"hAnsi"
+                                    || key_local.as_ref() == b"cs"
+                                {
+                                    let font_name = String::from_utf8_lossy(&attr.value);
+                                    if is_monospace_font(&font_name) {
+                                        code_font = true;
+                                    }
                                 }
                             }
                         }
+                        b"br" if in_run => {
+                            let inline = Inline::HardBreak;
+                            if in_hyperlink {
+                                hyperlink_inlines.push(inline);
+                            } else {
+                                inlines.push(inline);
+                            }
+                        }
+                        b"footnoteReference" if in_run => {
+                            // <w:footnoteReference w:id="N"/>
+                            for attr in e.attributes().flatten() {
+                                if attr.key.local_name().as_ref() == b"id" {
+                                    let id = String::from_utf8_lossy(&attr.value).into_owned();
+                                    let inline = Inline::FootnoteRef { id };
+                                    if in_hyperlink {
+                                        hyperlink_inlines.push(inline);
+                                    } else {
+                                        inlines.push(inline);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             Ok(Event::Text(ref e)) => {
-                if in_t && in_run {
+                if in_drawing {
+                    let text = e
+                        .unescape()
+                        .map_err(|err| DocxError::Xml(err.to_string()))?;
+                    drawing_xml.push_str(&text);
+                } else if in_t && in_run {
                     let text = e
                         .unescape()
                         .map_err(|err| DocxError::Xml(err.to_string()))?;
@@ -332,30 +481,49 @@ pub(crate) fn parse_runs(xml: &str, ctx: &ParseContext<'_>) -> Result<Vec<Inline
             Ok(Event::End(ref e)) => {
                 let local = e.local_name();
                 let name = local.as_ref();
-                match name {
-                    b"hyperlink" => {
-                        if in_hyperlink && !hyperlink_inlines.is_empty() {
-                            inlines.push(Inline::Link {
-                                url: hyperlink_url.clone(),
-                                title: None,
-                                content: std::mem::take(&mut hyperlink_inlines),
-                                attrs: None,
-                            });
+
+                if in_drawing {
+                    if drawing_depth == 0 {
+                        // Closing the <w:drawing> element itself
+                        append_end_tag(&mut drawing_xml, e.name().as_ref());
+                        in_drawing = false;
+                        if let Some(inline) = parse_drawing(&drawing_xml, ctx)? {
+                            if in_hyperlink {
+                                hyperlink_inlines.push(inline);
+                            } else {
+                                inlines.push(inline);
+                            }
                         }
-                        in_hyperlink = false;
+                    } else {
+                        drawing_depth -= 1;
+                        append_end_tag(&mut drawing_xml, e.name().as_ref());
                     }
-                    b"r" => {
-                        in_run = false;
-                        in_rpr = false;
-                        in_t = false;
+                } else {
+                    match name {
+                        b"hyperlink" => {
+                            if in_hyperlink && !hyperlink_inlines.is_empty() {
+                                inlines.push(Inline::Link {
+                                    url: hyperlink_url.clone(),
+                                    title: None,
+                                    content: std::mem::take(&mut hyperlink_inlines),
+                                    attrs: None,
+                                });
+                            }
+                            in_hyperlink = false;
+                        }
+                        b"r" => {
+                            in_run = false;
+                            in_rpr = false;
+                            in_t = false;
+                        }
+                        b"rPr" => {
+                            in_rpr = false;
+                        }
+                        b"t" => {
+                            in_t = false;
+                        }
+                        _ => {}
                     }
-                    b"rPr" => {
-                        in_rpr = false;
-                    }
-                    b"t" => {
-                        in_t = false;
-                    }
-                    _ => {}
                 }
             }
             Ok(Event::Eof) => break,
@@ -744,6 +912,74 @@ fn has_admonition_border(xml: &str) -> bool {
 
 // ─── parse_table ────────────────────────────────────────────────────────────
 
+/// Parse the inner content of a `<w:tc>` cell into blocks.
+///
+/// Splits the raw cell XML into top-level `<w:p>` elements and parses each
+/// through `parse_paragraph`, preserving paragraph boundaries.
+fn parse_cell_blocks(xml: &str, ctx: &ParseContext<'_>) -> Result<Vec<Block>, DocxError> {
+    let mut blocks = Vec::new();
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    let mut depth: u32 = 0;
+    let mut element_xml = String::new();
+    let mut in_paragraph = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let name = e.local_name();
+                if depth == 0 && name.as_ref() == b"p" {
+                    in_paragraph = true;
+                    element_xml.clear();
+                    append_start_tag(&mut element_xml, e);
+                    depth = 1;
+                } else if in_paragraph {
+                    depth += 1;
+                    append_start_tag(&mut element_xml, e);
+                } else {
+                    depth += 1;
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                if in_paragraph {
+                    depth -= 1;
+                    append_end_tag(&mut element_xml, e.name().as_ref());
+                    if depth == 0 {
+                        if let Some(block) = parse_paragraph(&element_xml, ctx)? {
+                            blocks.push(block);
+                        }
+                        in_paragraph = false;
+                        element_xml.clear();
+                    }
+                } else {
+                    depth = depth.saturating_sub(1);
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                if in_paragraph {
+                    append_empty_tag(&mut element_xml, e);
+                }
+            }
+            Ok(Event::Text(ref e)) => {
+                if in_paragraph {
+                    let text = e
+                        .unescape()
+                        .map_err(|err| DocxError::Xml(err.to_string()))?;
+                    element_xml.push_str(&quick_xml_escape(&text));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(DocxError::Xml(e.to_string())),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(blocks)
+}
+
 /// Parse a `<w:tbl>` element's XML into a `Block::Table`.
 fn parse_table(xml: &str, ctx: &ParseContext<'_>) -> Result<Block, DocxError> {
     let mut reader = Reader::from_str(xml);
@@ -863,15 +1099,8 @@ fn parse_table(xml: &str, ctx: &ParseContext<'_>) -> Result<Block, DocxError> {
                         in_tc_pr = false;
                     }
                     b"tc" if in_cell => {
-                        // Parse cell content (runs) into a paragraph
-                        let cell_inlines = parse_runs(&cell_xml, ctx)?;
-                        let content = if cell_inlines.is_empty() {
-                            vec![]
-                        } else {
-                            vec![Block::Paragraph {
-                                content: cell_inlines,
-                            }]
-                        };
+                        // Parse cell content: split into individual paragraphs
+                        let content = parse_cell_blocks(&cell_xml, ctx)?;
 
                         // Handle vMerge (vertical merge)
                         let rowspan = if cell_vmerge_continue {
@@ -1014,15 +1243,23 @@ fn resolve_vmerge(header_rows: &mut [Vec<TableCell>], body_rows: &mut [Vec<Table
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_archive() -> crate::archive::DocxArchive {
+        let zip = crate::tests::make_zip(&[("word/document.xml", b"<doc/>")]);
+        crate::archive::DocxArchive::from_bytes(&zip).unwrap()
+    }
+
     fn empty_ctx() -> ParseContext<'static> {
         // Leak to get 'static — fine in tests
         let styles: &'static StyleMap = Box::leak(Box::new(StyleMap::new()));
         let numbering: &'static NumberingMap = Box::leak(Box::new(NumberingMap::new()));
         let rels: &'static RelMap = Box::leak(Box::new(RelMap::new()));
+        let archive: &'static crate::archive::DocxArchive = Box::leak(Box::new(empty_archive()));
         ParseContext {
             styles,
             numbering,
             rels,
+            archive,
         }
     }
 
@@ -1122,10 +1359,12 @@ mod tests {
 
         let styles = StyleMap::new();
         let numbering = NumberingMap::new();
+        let archive = empty_archive();
         let ctx = ParseContext {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
         };
 
         let xml =
@@ -1202,10 +1441,12 @@ mod tests {
         );
         let numbering = NumberingMap::new();
         let rels = RelMap::new();
+        let archive = empty_archive();
         let ctx = ParseContext {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
         };
 
         let xml = wrap_p(
@@ -1225,10 +1466,12 @@ mod tests {
         let styles = StyleMap::new();
         let numbering = NumberingMap::new();
         let rels = RelMap::new();
+        let archive = empty_archive();
         let ctx = ParseContext {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
         };
 
         let xml = wrap_p(r#"<w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6"/></w:pBdr></w:pPr>"#);
@@ -1253,10 +1496,12 @@ mod tests {
         );
         let numbering = NumberingMap::new();
         let rels = RelMap::new();
+        let archive = empty_archive();
         let ctx = ParseContext {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
         };
 
         let xml = wrap_p(
@@ -1275,10 +1520,12 @@ mod tests {
         let styles = StyleMap::new();
         let numbering = NumberingMap::new();
         let rels = RelMap::new();
+        let archive = empty_archive();
         let ctx = ParseContext {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
         };
 
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1313,14 +1560,98 @@ mod tests {
     }
 
     #[test]
-    fn parse_body_with_paragraph() {
+    fn parse_table_multi_paragraph_cell() {
         let styles = StyleMap::new();
         let numbering = NumberingMap::new();
         let rels = RelMap::new();
+        let archive = empty_archive();
         let ctx = ParseContext {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
+        };
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+        <w:tbl xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+            <w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid>
+            <w:tr>
+                <w:tc>
+                    <w:p><w:r><w:t>First paragraph</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p>
+                    <w:p><w:r><w:t>Third paragraph</w:t></w:r></w:p>
+                </w:tc>
+            </w:tr>
+        </w:tbl>"#;
+
+        let block = parse_table(xml, &ctx).unwrap();
+        if let Block::Table(table) = &block {
+            assert_eq!(table.rows.len(), 1);
+            let cell = &table.rows[0][0];
+            assert_eq!(
+                cell.content.len(),
+                3,
+                "cell should have 3 separate paragraphs"
+            );
+            for block in &cell.content {
+                assert!(
+                    matches!(block, Block::Paragraph { .. }),
+                    "each block should be a Paragraph"
+                );
+            }
+        } else {
+            panic!("expected Table, got {:?}", block);
+        }
+    }
+
+    #[test]
+    fn parse_table_empty_paragraph_cell() {
+        let styles = StyleMap::new();
+        let numbering = NumberingMap::new();
+        let rels = RelMap::new();
+        let archive = empty_archive();
+        let ctx = ParseContext {
+            styles: &styles,
+            numbering: &numbering,
+            rels: &rels,
+            archive: &archive,
+        };
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+        <w:tbl xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+            <w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid>
+            <w:tr>
+                <w:tc>
+                    <w:p></w:p>
+                </w:tc>
+            </w:tr>
+        </w:tbl>"#;
+
+        let block = parse_table(xml, &ctx).unwrap();
+        if let Block::Table(table) = &block {
+            let cell = &table.rows[0][0];
+            assert!(
+                cell.content.is_empty(),
+                "empty paragraph should produce no blocks"
+            );
+        } else {
+            panic!("expected Table, got {:?}", block);
+        }
+    }
+
+    #[test]
+    fn parse_body_with_paragraph() {
+        let styles = StyleMap::new();
+        let numbering = NumberingMap::new();
+        let rels = RelMap::new();
+        let archive = empty_archive();
+        let ctx = ParseContext {
+            styles: &styles,
+            numbering: &numbering,
+            rels: &rels,
+            archive: &archive,
         };
 
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1341,10 +1672,12 @@ mod tests {
         let styles = StyleMap::new();
         let numbering = NumberingMap::new();
         let rels = RelMap::new();
+        let archive = empty_archive();
         let ctx = ParseContext {
             styles: &styles,
             numbering: &numbering,
             rels: &rels,
+            archive: &archive,
         };
 
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1369,5 +1702,117 @@ mod tests {
             },
         ];
         assert_eq!(extract_plain_text(&inlines), "bold normal");
+    }
+
+    // ── Drawing tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_drawing_inline() {
+        use crate::relationships::Relationship;
+
+        let mut rels = RelMap::new();
+        rels.insert(
+            "rId5".to_string(),
+            Relationship {
+                rel_type:
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                        .to_string(),
+                target: "media/image1.png".to_string(),
+                target_mode: None,
+            },
+        );
+
+        let styles = StyleMap::new();
+        let numbering = NumberingMap::new();
+        let archive = empty_archive();
+        let ctx = ParseContext {
+            styles: &styles,
+            numbering: &numbering,
+            rels: &rels,
+            archive: &archive,
+        };
+
+        let xml = wrap_p(
+            r#"<w:r><w:drawing>
+  <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+             xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <wp:docPr id="1" name="My Logo"/>
+    <a:graphic>
+      <a:graphicData>
+        <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+          <pic:blipFill>
+            <a:blip r:embed="rId5"/>
+          </pic:blipFill>
+        </pic:pic>
+      </a:graphicData>
+    </a:graphic>
+  </wp:inline>
+</w:drawing></w:r>"#,
+        );
+
+        let inlines = parse_runs(&xml, &ctx).unwrap();
+        assert_eq!(inlines.len(), 1, "expected exactly one inline");
+        if let Inline::Image(img) = &inlines[0] {
+            assert_eq!(img.url, "media/image1.png");
+            assert_eq!(img.alt_text(), "My Logo");
+        } else {
+            panic!("expected Image inline, got {:?}", inlines[0]);
+        }
+    }
+
+    #[test]
+    fn parse_drawing_anchor() {
+        use crate::relationships::Relationship;
+
+        let mut rels = RelMap::new();
+        rels.insert(
+            "rId5".to_string(),
+            Relationship {
+                rel_type:
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                        .to_string(),
+                target: "media/image1.png".to_string(),
+                target_mode: None,
+            },
+        );
+
+        let styles = StyleMap::new();
+        let numbering = NumberingMap::new();
+        let archive = empty_archive();
+        let ctx = ParseContext {
+            styles: &styles,
+            numbering: &numbering,
+            rels: &rels,
+            archive: &archive,
+        };
+
+        let xml = wrap_p(
+            r#"<w:r><w:drawing>
+  <wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+             xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <wp:docPr id="2" name="My Logo"/>
+    <a:graphic>
+      <a:graphicData>
+        <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+          <pic:blipFill>
+            <a:blip r:embed="rId5"/>
+          </pic:blipFill>
+        </pic:pic>
+      </a:graphicData>
+    </a:graphic>
+  </wp:anchor>
+</w:drawing></w:r>"#,
+        );
+
+        let inlines = parse_runs(&xml, &ctx).unwrap();
+        assert_eq!(inlines.len(), 1, "expected exactly one inline");
+        if let Inline::Image(img) = &inlines[0] {
+            assert_eq!(img.url, "media/image1.png");
+            assert_eq!(img.alt_text(), "My Logo");
+        } else {
+            panic!("expected Image inline, got {:?}", inlines[0]);
+        }
     }
 }
