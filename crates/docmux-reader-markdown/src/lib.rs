@@ -17,11 +17,20 @@ use std::collections::{HashMap, HashSet};
 
 /// A Markdown reader backed by comrak.
 #[derive(Debug, Default)]
-pub struct MarkdownReader;
+pub struct MarkdownReader {
+    id_prefix: Option<String>,
+}
 
 impl MarkdownReader {
     pub fn new() -> Self {
-        Self
+        Self { id_prefix: None }
+    }
+
+    /// Set a prefix for auto-generated heading IDs.
+    /// Explicit IDs (from `{#id}` attributes) are not prefixed.
+    pub fn with_id_prefix(mut self, prefix: String) -> Self {
+        self.id_prefix = Some(prefix);
+        self
     }
 
     fn comrak_options() -> Options<'static> {
@@ -524,7 +533,7 @@ impl Reader for MarkdownReader {
         let mut content = self.convert_node(root);
 
         // Auto-generate heading IDs (GFM-style slugification)
-        auto_id_headings(&mut content);
+        auto_id_headings(&mut content, self.id_prefix.as_deref());
         extract_table_captions(&mut content);
 
         Ok(Document {
@@ -541,34 +550,38 @@ impl Reader for MarkdownReader {
 
 /// Walk blocks and assign GFM-style IDs to headings that don't already have one.
 /// Duplicate slugs get a `-1`, `-2`, … suffix.
-fn auto_id_headings(blocks: &mut [Block]) {
+fn auto_id_headings(blocks: &mut [Block], id_prefix: Option<&str>) {
     let mut seen = HashSet::new();
-    auto_id_walk(blocks, &mut seen);
+    auto_id_walk(blocks, &mut seen, id_prefix);
 }
 
-fn auto_id_walk(blocks: &mut [Block], seen: &mut HashSet<String>) {
+fn auto_id_walk(blocks: &mut [Block], seen: &mut HashSet<String>, id_prefix: Option<&str>) {
     for block in blocks.iter_mut() {
         match block {
             Block::Heading { id, content, .. } => {
                 if let Some(ref existing) = id {
-                    // Register explicit IDs so auto-generated ones don't collide
+                    // Register explicit IDs — do NOT prefix them
                     seen.insert(existing.clone());
                 } else {
                     let slug = slugify_inlines(content);
                     if !slug.is_empty() {
-                        *id = Some(dedup_slug(slug, seen));
+                        let prefixed = match id_prefix {
+                            Some(p) => format!("{p}{slug}"),
+                            None => slug,
+                        };
+                        *id = Some(dedup_slug(prefixed, seen));
                     }
                 }
             }
-            Block::BlockQuote { content } => auto_id_walk(content, seen),
+            Block::BlockQuote { content } => auto_id_walk(content, seen, id_prefix),
             Block::List { items, .. } => {
                 for item in items {
-                    auto_id_walk(&mut item.content, seen);
+                    auto_id_walk(&mut item.content, seen, id_prefix);
                 }
             }
-            Block::Admonition { content, .. } => auto_id_walk(content, seen),
-            Block::Div { content, .. } => auto_id_walk(content, seen),
-            Block::FootnoteDef { content, .. } => auto_id_walk(content, seen),
+            Block::Admonition { content, .. } => auto_id_walk(content, seen, id_prefix),
+            Block::Div { content, .. } => auto_id_walk(content, seen, id_prefix),
+            Block::FootnoteDef { content, .. } => auto_id_walk(content, seen, id_prefix),
             _ => {}
         }
     }
@@ -2057,5 +2070,44 @@ mod tests {
             }
             _ => panic!("Expected a Table block"),
         }
+    }
+
+    #[test]
+    fn id_prefix_auto_generated() {
+        let reader = MarkdownReader::new().with_id_prefix("ch1-".to_string());
+        let doc = reader.read("# Hello World").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, .. } => {
+                assert_eq!(id.as_deref(), Some("ch1-hello-world"));
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn id_prefix_explicit_not_prefixed() {
+        let reader = MarkdownReader::new().with_id_prefix("ch1-".to_string());
+        let doc = reader.read("# Hello {#custom-id}").unwrap();
+        match &doc.content[0] {
+            Block::Heading { id, .. } => {
+                assert_eq!(id.as_deref(), Some("custom-id"));
+            }
+            other => panic!("Expected Heading, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn id_prefix_dedup_works() {
+        let reader = MarkdownReader::new().with_id_prefix("sec-".to_string());
+        let doc = reader.read("# Hello\n\n# Hello").unwrap();
+        let ids: Vec<_> = doc
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                Block::Heading { id, .. } => id.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, vec!["sec-hello", "sec-hello-1"]);
     }
 }
