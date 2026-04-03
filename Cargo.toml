@@ -20,6 +20,7 @@ members = [
     "crates/docmux-transform-crossref",
     "crates/docmux-transform-toc",
     "crates/docmux-transform-number-sections",
+    "crates/docmux-transform-section-divs",
     "crates/docmux-highlight",
     "crates/docmux-cli",
     "crates/docmux-wasm",
@@ -54,6 +55,7 @@ docmux-transform-cite = { path = "crates/docmux-transform-cite" }
 docmux-transform-crossref = { path = "crates/docmux-transform-crossref" }
 docmux-transform-toc = { path = "crates/docmux-transform-toc" }
 docmux-transform-number-sections = { path = "crates/docmux-transform-number-sections" }
+docmux-transform-section-divs = { path = "crates/docmux-transform-section-divs" }
 docmux-highlight = { path = "crates/docmux-highlight" }
 
 # External dependencies
