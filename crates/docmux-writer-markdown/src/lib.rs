@@ -350,6 +350,14 @@ impl MarkdownWriter {
     }
 
     fn write_table(&self, table: &Table, out: &mut String) {
+        // Emit caption above the table (pandoc convention)
+        if let Some(cap) = &table.caption {
+            out.push_str("Table: ");
+            self.write_inlines(cap, out);
+            out.push('\n');
+            out.push('\n');
+        }
+
         // Collect all rows for width calculation
         let ncols = table.columns.len().max(
             table
@@ -1098,6 +1106,59 @@ mod tests {
         assert!(md.contains("| Name | Value |"));
         assert!(md.contains("| :--- | ---: |"));
         assert!(md.contains("| Pi | 3.14 |"));
+    }
+
+    #[test]
+    fn table_with_caption() {
+        let doc = Document {
+            content: vec![Block::Table(Table {
+                caption: Some(vec![Inline::text("Experiment results")]),
+                label: None,
+                columns: vec![
+                    ColumnSpec {
+                        alignment: Alignment::Left,
+                        width: None,
+                    },
+                    ColumnSpec {
+                        alignment: Alignment::Right,
+                        width: None,
+                    },
+                ],
+                header: Some(vec![
+                    TableCell {
+                        content: vec![Block::text("Name")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                    TableCell {
+                        content: vec![Block::text("Score")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                ]),
+                rows: vec![vec![
+                    TableCell {
+                        content: vec![Block::text("Alice")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                    TableCell {
+                        content: vec![Block::text("95")],
+                        colspan: 1,
+                        rowspan: 1,
+                    },
+                ]],
+                foot: None,
+                attrs: None,
+            })],
+            ..Default::default()
+        };
+        let md = write_md(&doc);
+        assert!(
+            md.starts_with("Table: Experiment results\n"),
+            "Table caption should appear before table. Got:\n{md}"
+        );
+        assert!(md.contains("| Name"));
     }
 
     #[test]
