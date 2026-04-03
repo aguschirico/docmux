@@ -347,12 +347,13 @@ impl MarkdownReader {
         None
     }
 
-    /// Collect inline children of a node, applying bracketed-span post-processing.
+    /// Collect inline children of a node, applying raw-inline and bracketed-span post-processing.
     fn collect_inlines<'a>(&self, node: &'a AstNode<'a>) -> Vec<Inline> {
         let mut inlines = Vec::new();
         for child in node.children() {
             self.node_to_inlines(child, &mut inlines);
         }
+        postprocess_raw_inlines(&mut inlines);
         postprocess_bracketed_spans(&mut inlines);
         inlines
     }
@@ -857,6 +858,95 @@ fn yaml_value_to_string(val: &serde_yaml::Value) -> Option<String> {
 }
 
 // ─── Bracketed span post-processing ─────────────────────────────────────────
+
+/// Walk `Vec<Inline>` in place and convert `Code` nodes followed by a `Text`
+/// node starting with `{=format}` into `RawInline`.
+fn postprocess_raw_inlines(inlines: &mut Vec<Inline>) {
+    let mut i = 0;
+    while i + 1 < inlines.len() {
+        // Recurse into container inlines first.
+        match &mut inlines[i] {
+            Inline::Emphasis { content }
+            | Inline::Strong { content }
+            | Inline::Strikethrough { content }
+            | Inline::Superscript { content }
+            | Inline::Subscript { content }
+            | Inline::SmallCaps { content }
+            | Inline::Underline { content }
+            | Inline::Span { content, .. }
+            | Inline::Link { content, .. } => {
+                postprocess_raw_inlines(content);
+            }
+            _ => {}
+        }
+
+        let is_code = matches!(&inlines[i], Inline::Code { .. });
+        if !is_code {
+            i += 1;
+            continue;
+        }
+
+        // Check if the next node is Text starting with `{=format}`
+        if let Inline::Text { value: next_text } = &inlines[i + 1] {
+            if let Some(raw_fmt) = parse_raw_attribute_inline(next_text) {
+                let code_value = match &inlines[i] {
+                    Inline::Code { value, .. } => value.clone(),
+                    _ => unreachable!(),
+                };
+                let remaining = next_text[raw_fmt.consumed..].to_string();
+
+                inlines[i] = Inline::RawInline {
+                    format: raw_fmt.format,
+                    content: code_value,
+                };
+                if remaining.is_empty() {
+                    inlines.remove(i + 1);
+                } else {
+                    inlines[i + 1] = Inline::Text { value: remaining };
+                }
+                continue;
+            }
+        }
+        i += 1;
+    }
+
+    // Handle the last element's children if it's a container
+    if let Some(
+        Inline::Emphasis { content }
+        | Inline::Strong { content }
+        | Inline::Strikethrough { content }
+        | Inline::Superscript { content }
+        | Inline::Subscript { content }
+        | Inline::SmallCaps { content }
+        | Inline::Underline { content }
+        | Inline::Span { content, .. }
+        | Inline::Link { content, .. },
+    ) = inlines.last_mut()
+    {
+        postprocess_raw_inlines(content);
+    }
+}
+
+struct RawAttrParse {
+    format: String,
+    consumed: usize,
+}
+
+/// Try to parse `{=format}` at the start of a string.
+fn parse_raw_attribute_inline(s: &str) -> Option<RawAttrParse> {
+    if !s.starts_with("{=") {
+        return None;
+    }
+    let end = s.find('}')?;
+    let fmt = s[2..end].trim().to_string();
+    if fmt.is_empty() {
+        return None;
+    }
+    Some(RawAttrParse {
+        format: fmt,
+        consumed: end + 1,
+    })
+}
 
 /// Walk a `Vec<Inline>` in place and convert any `Text` node that contains
 /// the literal pattern `[content]{attrs}` into a `Span`.
@@ -1729,5 +1819,56 @@ mod tests {
             "Empty format should stay as CodeBlock, got: {:?}",
             doc.content[0]
         );
+    }
+
+    #[test]
+    fn raw_attribute_inline_html() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("`<b>bold</b>`{=html}").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            assert_eq!(content.len(), 1);
+            match &content[0] {
+                Inline::RawInline { format, content } => {
+                    assert_eq!(format, "html");
+                    assert_eq!(content, "<b>bold</b>");
+                }
+                other => panic!("Expected RawInline, got {:?}", other),
+            }
+        } else {
+            panic!("Expected Paragraph");
+        }
+    }
+
+    #[test]
+    fn raw_attribute_inline_latex() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read(r"`\textbf{bold}`{=latex}").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            assert_eq!(content.len(), 1);
+            match &content[0] {
+                Inline::RawInline { format, content } => {
+                    assert_eq!(format, "latex");
+                    assert_eq!(content, r"\textbf{bold}");
+                }
+                other => panic!("Expected RawInline, got {:?}", other),
+            }
+        } else {
+            panic!("Expected Paragraph");
+        }
+    }
+
+    #[test]
+    fn raw_attribute_inline_with_surrounding_text() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("Before `<br>`{=html} after.").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        if let Block::Paragraph { content } = &doc.content[0] {
+            let has_raw = content
+                .iter()
+                .any(|i| matches!(i, Inline::RawInline { format, .. } if format == "html"));
+            assert!(has_raw, "Expected RawInline in: {:?}", content);
+        }
     }
 }
