@@ -184,6 +184,13 @@ impl MarkdownReader {
             }
             NodeValue::CodeBlock(cb) => {
                 let info = cb.info.trim();
+                // Raw attribute: ```{=format} → RawBlock
+                if let Some(raw_fmt) = parse_raw_attribute(info) {
+                    return Some(Block::RawBlock {
+                        format: raw_fmt,
+                        content: cb.literal.clone(),
+                    });
+                }
                 let (language, attrs) = if info.starts_with('{') {
                     // Pandoc-style fenced code attributes: ```{.python .numberLines}
                     match parse_attr_block(info) {
@@ -637,6 +644,22 @@ fn dedup_slug(slug: String, seen: &mut HashSet<String>) -> String {
         }
         n += 1;
     }
+}
+
+// ─── Raw attribute parsing ────────────────────────────────────────────────────
+
+/// Parse a raw attribute format specifier: `{=html}`, `{=latex}`, etc.
+/// Returns the format name, or `None` if not a valid raw attribute.
+fn parse_raw_attribute(info: &str) -> Option<String> {
+    let s = info.trim();
+    if !s.starts_with("{=") || !s.ends_with('}') {
+        return None;
+    }
+    let fmt = s[2..s.len() - 1].trim().to_string();
+    if fmt.is_empty() {
+        return None;
+    }
+    Some(fmt)
 }
 
 // ─── Pandoc-style attribute parsing ──────────────────────────────────────────
@@ -1660,5 +1683,51 @@ mod tests {
         } else {
             panic!("Expected Paragraph");
         }
+    }
+
+    // ─── Raw attribute tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn raw_attribute_code_block_html() {
+        let reader = MarkdownReader::new();
+        let doc = reader
+            .read("```{=html}\n<div class=\"custom\">raw html</div>\n```")
+            .unwrap();
+        assert_eq!(doc.content.len(), 1);
+        match &doc.content[0] {
+            Block::RawBlock { format, content } => {
+                assert_eq!(format, "html");
+                assert!(content.contains("<div class=\"custom\">raw html</div>"));
+            }
+            other => panic!("Expected RawBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn raw_attribute_code_block_latex() {
+        let reader = MarkdownReader::new();
+        let doc = reader
+            .read("```{=latex}\n\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\end{tikzpicture}\n```")
+            .unwrap();
+        assert_eq!(doc.content.len(), 1);
+        match &doc.content[0] {
+            Block::RawBlock { format, content } => {
+                assert_eq!(format, "latex");
+                assert!(content.contains("\\begin{tikzpicture}"));
+            }
+            other => panic!("Expected RawBlock, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn raw_attribute_empty_format_stays_code_block() {
+        let reader = MarkdownReader::new();
+        let doc = reader.read("```{=}\nsome content\n```").unwrap();
+        assert_eq!(doc.content.len(), 1);
+        assert!(
+            matches!(&doc.content[0], Block::CodeBlock { .. }),
+            "Empty format should stay as CodeBlock, got: {:?}",
+            doc.content[0]
+        );
     }
 }
