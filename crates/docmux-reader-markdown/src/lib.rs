@@ -525,6 +525,7 @@ impl Reader for MarkdownReader {
 
         // Auto-generate heading IDs (GFM-style slugification)
         auto_id_headings(&mut content);
+        extract_table_captions(&mut content);
 
         Ok(Document {
             metadata,
@@ -645,6 +646,88 @@ fn dedup_slug(slug: String, seen: &mut HashSet<String>) -> String {
         }
         n += 1;
     }
+}
+
+// ─── Table caption extraction ──────────────────────────────────────────────
+
+/// Extract table captions from adjacent paragraphs.
+///
+/// Pandoc convention: a `Paragraph` starting with `Table:` or `: ` immediately
+/// before or after a `Table` is treated as a table caption. Caption above the
+/// table takes priority.
+fn extract_table_captions(blocks: &mut Vec<Block>) {
+    // First pass: captions ABOVE tables (Paragraph then Table).
+    // Walk backwards so removals don't shift indices.
+    let mut i = blocks.len().wrapping_sub(1);
+    while i > 0 && i < blocks.len() {
+        if matches!(&blocks[i], Block::Table(_)) {
+            if let Some(caption) = try_extract_caption(&blocks[i - 1]) {
+                if let Block::Table(ref mut table) = blocks[i] {
+                    table.caption = Some(caption);
+                }
+                blocks.remove(i - 1);
+                i = i.saturating_sub(2);
+                continue;
+            }
+        }
+        i = i.wrapping_sub(1);
+    }
+
+    // Second pass: captions BELOW tables (Table then Paragraph).
+    // Only if the table doesn't already have a caption from above.
+    let mut i = 0;
+    while i + 1 < blocks.len() {
+        if let Block::Table(ref table) = blocks[i] {
+            if table.caption.is_none() {
+                if let Some(caption) = try_extract_caption(&blocks[i + 1]) {
+                    if let Block::Table(ref mut table) = blocks[i] {
+                        table.caption = Some(caption);
+                    }
+                    blocks.remove(i + 1);
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Check if a block is a caption paragraph (starts with `Table:` or `: `).
+/// Returns the caption inlines with the prefix stripped.
+fn try_extract_caption(block: &Block) -> Option<Vec<Inline>> {
+    let Block::Paragraph { content } = block else {
+        return None;
+    };
+    if content.is_empty() {
+        return None;
+    }
+    let Inline::Text { value } = &content[0] else {
+        return None;
+    };
+
+    let stripped = if let Some(rest) = value.strip_prefix("Table:") {
+        rest.trim_start().to_string()
+    } else if let Some(rest) = value.strip_prefix(": ") {
+        rest.to_string()
+    } else if value == ":" && content.len() > 1 {
+        String::new()
+    } else {
+        return None;
+    };
+
+    let mut caption = content.clone();
+    if stripped.is_empty() && content.len() > 1 {
+        caption.remove(0);
+        if let Some(Inline::Text { value }) = caption.first_mut() {
+            *value = value.trim_start().to_string();
+        }
+    } else if stripped.is_empty() {
+        return None;
+    } else {
+        caption[0] = Inline::Text { value: stripped };
+    }
+
+    Some(caption)
 }
 
 // ─── Raw attribute parsing ────────────────────────────────────────────────────
@@ -1869,6 +1952,110 @@ mod tests {
                 .iter()
                 .any(|i| matches!(i, Inline::RawInline { format, .. } if format == "html"));
             assert!(has_raw, "Expected RawInline in: {:?}", content);
+        }
+    }
+
+    // ─── Table caption tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn table_caption_above() {
+        let reader = MarkdownReader::new();
+        let input = ": Simple caption\n\n| A | B |\n| --- | --- |\n| 1 | 2 |";
+        let doc = reader.read(input).unwrap();
+        assert_eq!(
+            doc.content.len(),
+            1,
+            "Caption paragraph should be absorbed. Got: {:#?}",
+            doc.content
+        );
+        match &doc.content[0] {
+            Block::Table(table) => {
+                let cap = table.caption.as_ref().expect("Table should have caption");
+                let text = match &cap[0] {
+                    Inline::Text { value } => value.as_str(),
+                    other => panic!("Expected Text, got {:?}", other),
+                };
+                assert_eq!(text, "Simple caption");
+            }
+            other => panic!("Expected Table, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn table_caption_with_prefix() {
+        let reader = MarkdownReader::new();
+        let input = "Table: Results summary\n\n| X | Y |\n| --- | --- |\n| a | b |";
+        let doc = reader.read(input).unwrap();
+        assert_eq!(doc.content.len(), 1);
+        match &doc.content[0] {
+            Block::Table(table) => {
+                let cap = table.caption.as_ref().expect("Table should have caption");
+                let text = match &cap[0] {
+                    Inline::Text { value } => value.as_str(),
+                    other => panic!("Expected Text, got {:?}", other),
+                };
+                assert_eq!(text, "Results summary");
+            }
+            other => panic!("Expected Table, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn table_caption_below() {
+        let reader = MarkdownReader::new();
+        let input = "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n: Below caption";
+        let doc = reader.read(input).unwrap();
+        assert_eq!(doc.content.len(), 1);
+        match &doc.content[0] {
+            Block::Table(table) => {
+                let cap = table.caption.as_ref().expect("Table should have caption");
+                let text = match &cap[0] {
+                    Inline::Text { value } => value.as_str(),
+                    other => panic!("Expected Text, got {:?}", other),
+                };
+                assert_eq!(text, "Below caption");
+            }
+            other => panic!("Expected Table, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn table_caption_above_wins_over_below() {
+        let reader = MarkdownReader::new();
+        let input = ": Above\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n: Below";
+        let doc = reader.read(input).unwrap();
+        let table_block = doc
+            .content
+            .iter()
+            .find(|b| matches!(b, Block::Table(_)))
+            .expect("Should have a table");
+        match table_block {
+            Block::Table(table) => {
+                let cap = table.caption.as_ref().expect("Table should have caption");
+                let text = match &cap[0] {
+                    Inline::Text { value } => value.as_str(),
+                    other => panic!("Expected Text, got {:?}", other),
+                };
+                assert_eq!(text, "Above");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn non_adjacent_colon_paragraph_not_caption() {
+        let reader = MarkdownReader::new();
+        let input =
+            ": Not a caption\n\nSome paragraph in between.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |";
+        let doc = reader.read(input).unwrap();
+        match doc.content.iter().find(|b| matches!(b, Block::Table(_))) {
+            Some(Block::Table(table)) => {
+                assert!(
+                    table.caption.is_none(),
+                    "Non-adjacent paragraph should not become caption"
+                );
+            }
+            _ => panic!("Expected a Table block"),
         }
     }
 }
