@@ -119,6 +119,10 @@ struct Cli {
     #[arg(long, value_name = "STYLE")]
     highlight_style: Option<String>,
 
+    /// Prefix for auto-generated identifiers (e.g. --id-prefix=ch1-)
+    #[arg(long, value_name = "PREFIX")]
+    id_prefix: Option<String>,
+
     /// List available syntax highlighting themes and exit
     #[arg(long)]
     list_highlight_themes: bool,
@@ -128,9 +132,13 @@ struct Cli {
     list_highlight_languages: bool,
 }
 
-fn build_registry() -> Registry {
+fn build_registry(id_prefix: Option<&str>) -> Registry {
     let mut reg = Registry::new();
-    reg.add_reader(Box::new(MarkdownReader::new()));
+    let md_reader = match id_prefix {
+        Some(p) => MarkdownReader::new().with_id_prefix(p.to_string()),
+        None => MarkdownReader::new(),
+    };
+    reg.add_reader(Box::new(md_reader));
     reg.add_reader(Box::new(LatexReader::new()));
     reg.add_reader(Box::new(MystReader::new()));
     reg.add_reader(Box::new(TypstReader::new()));
@@ -147,7 +155,7 @@ fn build_registry() -> Registry {
 
 fn main() {
     let cli = Cli::parse();
-    let registry = build_registry();
+    let registry = build_registry(cli.id_prefix.as_deref());
 
     // --list-input-formats / --list-output-formats
     if cli.list_input_formats {
