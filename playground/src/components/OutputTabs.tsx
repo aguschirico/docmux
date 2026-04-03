@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -11,7 +12,7 @@ import {
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useConversion } from "@/hooks/useConversion";
 import { db } from "@/vfs/db";
-import { getFormat, isBinaryFormat } from "@/lib/formats";
+import { getFormat, getExtension, isBinaryFormat } from "@/lib/formats";
 import { HtmlPreview } from "@/components/output-tabs/HtmlPreview";
 import { ReadOnlyEditor } from "@/components/output-tabs/ReadOnlyEditor";
 import { DiagnosticsView } from "@/components/output-tabs/DiagnosticsView";
@@ -30,6 +31,14 @@ const FORMAT_TO_MONACO: Record<string, string> = {
   typst: "plaintext",
   markdown: "markdown",
   plain: "plaintext",
+};
+
+const FORMAT_TO_EXT: Record<string, string> = {
+  html: "html",
+  latex: "tex",
+  typst: "typ",
+  markdown: "md",
+  plain: "txt",
 };
 
 export function OutputTabs() {
@@ -54,6 +63,21 @@ export function OutputTabs() {
     outputFormat,
     binaryContent,
   );
+
+  function handleDownload() {
+    if (!source) return;
+    const ext = FORMAT_TO_EXT[outputFormat] ?? "txt";
+    const baseName = file?.path
+      ? file.path.replace(`.${getExtension(file.path)}`, "")
+      : "output";
+    const blob = new Blob([source], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${baseName}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <Tabs defaultValue="preview" className="flex h-full flex-col">
@@ -94,6 +118,15 @@ export function OutputTabs() {
         </TabsList>
 
         <div className="ml-auto" />
+        <button
+          disabled={!source}
+          onClick={handleDownload}
+          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:pointer-events-none disabled:opacity-30"
+          title="Download converted output"
+        >
+          <Download className="h-3 w-3" />
+          Export
+        </button>
       </div>
 
       <TabsContent value="preview" className="flex-1 overflow-auto">
