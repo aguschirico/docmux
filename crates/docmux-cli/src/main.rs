@@ -12,6 +12,7 @@ use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
 use docmux_transform_number_sections::NumberSectionsTransform;
+use docmux_transform_section_divs::SectionDivsTransform;
 use docmux_transform_toc::TocTransform;
 use docmux_writer_docx::DocxWriter;
 use docmux_writer_html::HtmlWriter;
@@ -122,6 +123,10 @@ struct Cli {
     /// Prefix for auto-generated identifiers (e.g. --id-prefix=ch1-)
     #[arg(long, value_name = "PREFIX")]
     id_prefix: Option<String>,
+
+    /// Wrap sections (heading + content) in <div> containers
+    #[arg(long)]
+    section_divs: bool,
 
     /// List available syntax highlighting themes and exit
     #[arg(long)]
@@ -292,6 +297,15 @@ fn main() {
         );
         if let Err(e) = NumberSectionsTransform::new().transform(&mut doc, &ctx) {
             eprintln!("docmux: number-sections error: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    // Apply --section-divs (after --number-sections, before --toc)
+    if cli.section_divs {
+        let ctx = TransformContext::default();
+        if let Err(e) = SectionDivsTransform::new().transform(&mut doc, &ctx) {
+            eprintln!("docmux: section-divs error: {e}");
             std::process::exit(1);
         }
     }
