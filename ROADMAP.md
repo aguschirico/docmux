@@ -75,14 +75,14 @@
 - [ ] `--template=FILE` with template engine
 - [ ] `--bibliography=FILE`, `--csl=FILE`
 - [x] `--highlight-style=STYLE`, `--list-highlight-themes`, `--list-highlight-languages`
-- [ ] `--section-divs`, `--id-prefix=PREFIX`
+- [x] `--section-divs`, `--id-prefix=PREFIX`
 
 ### Pandoc parity — Extensions (markdown reader)
 
 - [x] Smart punctuation (`--smart`) — enabled via comrak `parse.smart`
 - [x] Bracketed spans `[text]{.class}` (5 tests)
-- [ ] `raw_attribute` syntax
-- [ ] Table captions
+- [x] `raw_attribute` syntax (inline + block, 6 tests)
+- [x] Table captions (pandoc convention, 5 tests)
 - [x] Subscript `~text~` in markdown (via comrak extension)
 - [x] Superscript `^text^` in markdown (via comrak extension)
 
@@ -91,6 +91,7 @@
 - [ ] `docmux-transform-cite` — CSL citation processing
 - [x] `docmux-transform-toc` — table of contents generation (6 tests)
 - [x] `docmux-transform-number-sections` — heading numbering (7 tests)
+- [x] `docmux-transform-section-divs` — wrap sections in Div containers (7 tests)
 - [ ] `docmux-transform-math` — normalize math notation across formats
 
 ### Writers & readers
