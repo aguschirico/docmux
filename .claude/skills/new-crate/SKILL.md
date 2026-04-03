@@ -1,6 +1,8 @@
 ---
 name: new-crate
 description: Scaffold a new docmux crate (reader, writer, or transform) with standard workspace structure, trait implementation, and tests
+disable-model-invocation: true
+argument-hint: "reader|writer|transform <name>"
 ---
 
 # Scaffold a New docmux Crate
@@ -185,3 +187,10 @@ cargo check -p docmux-{type}-{name}
 cargo test -p docmux-{type}-{name}
 cargo clippy -p docmux-{type}-{name} -- -D warnings
 ```
+
+### 6. Update documentation
+
+After scaffolding, update these files to reflect the new crate:
+- `CLAUDE.md` — update crate count in the Architecture section if mentioned
+- `memory/project_status.md` — update crate count and test count
+- If the crate introduces format-specific architecture, create a `.claude/rules/{name}.md` with path-scoped rules

@@ -9,3 +9,5 @@ node_modules/
 playground/dist/
 playground/wasm-pkg/
 /.playwright-mcp
+CLAUDE.local.md
+.claude/settings.local.json

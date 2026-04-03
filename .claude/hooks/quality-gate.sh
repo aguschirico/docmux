@@ -20,6 +20,9 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$REPO_ROOT"
 
+# Clean up stale marker files older than 24 hours
+find /tmp -maxdepth 1 -name 'docmux-qg-*' -mmin +1440 -delete 2>/dev/null || true
+
 # ─── Detect code changes (staged + unstaged + untracked) ────────────
 RUST_CHANGED=$(git diff --name-only HEAD -- '*.rs' 2>/dev/null; git ls-files --others --exclude-standard -- '*.rs' 2>/dev/null)
 TS_CHANGED=$(git diff --name-only HEAD -- 'playground/*.ts' 'playground/*.tsx' 2>/dev/null; git ls-files --others --exclude-standard -- 'playground/*.ts' 'playground/*.tsx' 2>/dev/null)
@@ -74,6 +77,29 @@ if [ -n "$FAILURES" ]; then
     rm -f "$MARKER" "$MECH_MARKER"
     jq -n --arg reason "$REASON" '{"decision":"block","reason":$reason}'
     exit 0
+fi
+
+# ─── Phase 3: Documentation staleness check (once per change set) ────
+DOC_MARKER="/tmp/docmux-qg-doc-${DIFF_HASH}"
+if [ ! -f "$DOC_MARKER" ]; then
+    ACTUAL_CRATES=$(ls -d "$REPO_ROOT"/crates/*/ 2>/dev/null | wc -l | tr -d ' ')
+    CLAUDE_MD="$REPO_ROOT/CLAUDE.md"
+    DOC_WARNINGS=""
+
+    if [ -f "$CLAUDE_MD" ]; then
+        # Check if CLAUDE.md mentions a crate count that differs from reality
+        STATED_CRATES=$(grep -oE '[0-9]+ crates' "$CLAUDE_MD" | head -1 | grep -oE '[0-9]+')
+        if [ -n "$STATED_CRATES" ] && [ "$STATED_CRATES" != "$ACTUAL_CRATES" ]; then
+            DOC_WARNINGS="${DOC_WARNINGS}- CLAUDE.md says ${STATED_CRATES} crates but there are ${ACTUAL_CRATES}\n"
+        fi
+    fi
+
+    if [ -n "$DOC_WARNINGS" ]; then
+        REASON=$(printf "DOCUMENTATION STALENESS — update before completing:\n%b\nUpdate the crate count in CLAUDE.md and memory/project_status.md." "$DOC_WARNINGS")
+        jq -n --arg reason "$REASON" '{"decision":"block","reason":$reason}'
+        exit 0
+    fi
+    touch "$DOC_MARKER"
 fi
 
 # All checks passed
