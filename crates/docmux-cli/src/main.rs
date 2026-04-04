@@ -32,7 +32,7 @@ use std::path::PathBuf;
 )]
 struct Cli {
     /// Input file(s). Use `-` for stdin.
-    #[arg(required_unless_present_any = ["list_input_formats", "list_output_formats", "list_highlight_themes", "list_highlight_languages"])]
+    #[arg(required_unless_present_any = ["list_input_formats", "list_output_formats", "list_highlight_themes", "list_highlight_languages", "print_default_template"])]
     input: Vec<PathBuf>,
 
     /// Output file path (use `-` for stdout)
@@ -128,6 +128,14 @@ struct Cli {
     #[arg(long)]
     section_divs: bool,
 
+    /// Custom template file (implies --standalone)
+    #[arg(long, value_name = "FILE")]
+    template: Option<PathBuf>,
+
+    /// Print the default template for the given format and exit
+    #[arg(long, value_name = "FORMAT")]
+    print_default_template: Option<String>,
+
     /// List available syntax highlighting themes and exit
     #[arg(long)]
     list_highlight_themes: bool,
@@ -188,6 +196,21 @@ fn main() {
             println!("{lang}");
         }
         return;
+    }
+
+    if let Some(format) = &cli.print_default_template {
+        match docmux_template::default_template_for(format) {
+            Some(tmpl) => {
+                print!("{tmpl}");
+                return;
+            }
+            None => {
+                eprintln!(
+                    "docmux: no default template for format '{format}'. Available: html, latex, markdown, plain"
+                );
+                std::process::exit(1);
+            }
+        }
     }
 
     // Determine input format from first non-stdin file
@@ -392,8 +415,12 @@ fn main() {
         _ => Eol::Lf,
     };
 
+    let standalone = cli.standalone || cli.template.is_some();
+    let template = cli.template.as_ref().map(|p| p.display().to_string());
+
     let opts = WriteOptions {
-        standalone: cli.standalone,
+        standalone,
+        template,
         math_engine,
         variables,
         wrap,
