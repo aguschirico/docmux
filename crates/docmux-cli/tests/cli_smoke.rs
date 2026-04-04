@@ -78,7 +78,9 @@ fn converts_to_file_output() {
 
 #[test]
 fn standalone_flag_produces_full_html() {
-    let input = fixtures_dir().join("basic/paragraph.md");
+    // Use frontmatter.md so the document has a title (template only emits
+    // <title> when the variable is set).
+    let input = fixtures_dir().join("basic/frontmatter.md");
     let output = Command::new(docmux_bin())
         .arg(&input)
         .arg("--standalone")

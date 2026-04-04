@@ -527,9 +527,74 @@ impl HtmlWriter {
         }
     }
 
-    fn wrap_standalone(&self, body: &str, doc: &Document, opts: &WriteOptions) -> String {
-        let title = doc.metadata.title.as_deref().unwrap_or("Untitled Document");
+    fn wrap_standalone(
+        &self,
+        body: &str,
+        doc: &Document,
+        opts: &WriteOptions,
+    ) -> docmux_core::Result<String> {
+        let template_src = match &opts.template {
+            Some(path) => std::fs::read_to_string(path)?,
+            None => docmux_template::DEFAULT_HTML.to_string(),
+        };
+        let ctx = self.build_template_context(body, doc, opts);
+        docmux_template::render(&template_src, &ctx).map_err(docmux_core::ConvertError::from)
+    }
 
+    fn build_template_context(
+        &self,
+        body: &str,
+        doc: &Document,
+        opts: &WriteOptions,
+    ) -> docmux_template::TemplateContext {
+        use docmux_template::TemplateValue;
+        let mut ctx = docmux_template::TemplateContext::new();
+
+        // Body
+        ctx.insert("body".into(), TemplateValue::Str(body.to_string()));
+
+        // Title (HTML-escaped)
+        if let Some(title) = &doc.metadata.title {
+            ctx.insert("title".into(), TemplateValue::Str(escape_html(title)));
+        }
+
+        // Authors
+        if !doc.metadata.authors.is_empty() {
+            let author_list: Vec<TemplateValue> = doc
+                .metadata
+                .authors
+                .iter()
+                .map(|a| {
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("name".into(), TemplateValue::Str(escape_html(&a.name)));
+                    if let Some(email) = &a.email {
+                        map.insert("email".into(), TemplateValue::Str(escape_html(email)));
+                    }
+                    if let Some(aff) = &a.affiliation {
+                        map.insert("affiliation".into(), TemplateValue::Str(escape_html(aff)));
+                    }
+                    if let Some(orcid) = &a.orcid {
+                        map.insert("orcid".into(), TemplateValue::Str(escape_html(orcid)));
+                    }
+                    TemplateValue::Map(map)
+                })
+                .collect();
+            ctx.insert("author".into(), TemplateValue::List(author_list));
+        }
+
+        // Date
+        if let Some(date) = &doc.metadata.date {
+            ctx.insert("date".into(), TemplateValue::Str(escape_html(date)));
+        }
+
+        // Abstract (rendered as HTML)
+        if let Some(blocks) = &doc.metadata.abstract_text {
+            let mut abs_html = String::new();
+            self.write_blocks(blocks, opts, doc, &mut abs_html);
+            ctx.insert("abstract".into(), TemplateValue::Str(abs_html));
+        }
+
+        // Math engine head
         let math_head = match opts.math_engine {
             MathEngine::KaTeX => {
                 r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -542,22 +607,38 @@ impl HtmlWriter {
             }
             MathEngine::Raw => "",
         };
+        if !math_head.is_empty() {
+            ctx.insert("math".into(), TemplateValue::Str(math_head.to_string()));
+        }
 
-        format!(
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-{math_head}
-</head>
-<body>
-{body}</body>
-</html>
-"#,
-            title = escape_html(title),
-        )
+        // CSS URLs from variables
+        let mut css_urls: Vec<TemplateValue> = Vec::new();
+        // "css" is the first URL, "css1", "css2" etc are subsequent
+        if let Some(url) = opts.variables.get("css") {
+            css_urls.push(TemplateValue::Str(url.clone()));
+        }
+        for i in 1.. {
+            let key = format!("css{i}");
+            if let Some(url) = opts.variables.get(&key) {
+                css_urls.push(TemplateValue::Str(url.clone()));
+            } else {
+                break;
+            }
+        }
+        if !css_urls.is_empty() {
+            ctx.insert("css".into(), TemplateValue::List(css_urls));
+        }
+
+        // Merge user variables (these override metadata)
+        for (k, v) in &opts.variables {
+            // Skip css variables (already handled above)
+            if k == "css" || (k.starts_with("css") && k[3..].parse::<u32>().is_ok()) {
+                continue;
+            }
+            ctx.insert(k.clone(), TemplateValue::Str(v.clone()));
+        }
+
+        ctx
     }
 }
 
@@ -575,7 +656,7 @@ impl Writer for HtmlWriter {
         self.write_blocks(&doc.content, opts, doc, &mut body);
 
         if opts.standalone {
-            Ok(self.wrap_standalone(&body, doc, opts))
+            self.wrap_standalone(&body, doc, opts)
         } else {
             Ok(body)
         }
