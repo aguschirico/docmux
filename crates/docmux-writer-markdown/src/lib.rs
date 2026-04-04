@@ -606,11 +606,23 @@ impl MarkdownWriter {
         }
     }
 
-    fn wrap_standalone(&self, body: &str, doc: &Document) -> String {
-        let mut out = String::with_capacity(body.len() + 256);
+    fn wrap_standalone(&self, body: &str, doc: &Document) -> docmux_core::Result<String> {
+        let template_src = docmux_template::DEFAULT_MARKDOWN.to_string();
+        let ctx = self.build_template_context(body, doc);
+        docmux_template::render(&template_src, &ctx).map_err(docmux_core::ConvertError::from)
+    }
 
-        // YAML frontmatter
+    fn build_template_context(
+        &self,
+        body: &str,
+        doc: &Document,
+    ) -> docmux_template::TemplateContext {
+        use docmux_template::TemplateValue;
         let meta = &doc.metadata;
+        let mut ctx = docmux_template::TemplateContext::new();
+
+        ctx.insert("body".into(), TemplateValue::Str(body.to_string()));
+
         let has_meta = meta.title.is_some()
             || !meta.authors.is_empty()
             || meta.date.is_some()
@@ -619,60 +631,71 @@ impl MarkdownWriter {
             || !meta.custom.is_empty();
 
         if has_meta {
-            out.push_str("---\n");
-            if let Some(title) = &meta.title {
-                out.push_str(&format!("title: \"{}\"\n", yaml_escape(title)));
-            }
-            if meta.authors.len() == 1 {
-                out.push_str(&format!(
-                    "author: \"{}\"\n",
-                    yaml_escape(&meta.authors[0].name)
-                ));
-            } else if meta.authors.len() > 1 {
-                out.push_str("author:\n");
-                for a in &meta.authors {
-                    if a.affiliation.is_some() || a.email.is_some() || a.orcid.is_some() {
-                        out.push_str(&format!("  - name: \"{}\"\n", yaml_escape(&a.name)));
-                        if let Some(aff) = &a.affiliation {
-                            out.push_str(&format!("    affiliation: \"{}\"\n", yaml_escape(aff)));
-                        }
-                        if let Some(email) = &a.email {
-                            out.push_str(&format!("    email: \"{}\"\n", yaml_escape(email)));
-                        }
-                        if let Some(orcid) = &a.orcid {
-                            out.push_str(&format!("    orcid: \"{}\"\n", yaml_escape(orcid)));
-                        }
-                    } else {
-                        out.push_str(&format!("  - \"{}\"\n", yaml_escape(&a.name)));
-                    }
-                }
-            }
-            if let Some(date) = &meta.date {
-                out.push_str(&format!("date: \"{}\"\n", yaml_escape(date)));
-            }
-            if let Some(abstract_blocks) = &meta.abstract_text {
-                // Flatten abstract blocks to plain text for YAML
-                let abstract_text = blocks_to_plain_text(abstract_blocks);
-                out.push_str(&format!("abstract: \"{}\"\n", yaml_escape(&abstract_text)));
-            }
-            if !meta.keywords.is_empty() {
-                out.push_str(&format!(
-                    "keywords: [{}]\n",
-                    meta.keywords
-                        .iter()
-                        .map(|k| format!("\"{}\"", yaml_escape(k)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-            for (k, v) in &meta.custom {
-                write_meta_value(&mut out, k, v, 0);
-            }
-            out.push_str("---\n\n");
+            ctx.insert("has-meta".into(), TemplateValue::Bool(true));
         }
 
-        out.push_str(body);
-        out
+        if let Some(title) = &meta.title {
+            ctx.insert("title".into(), TemplateValue::Str(yaml_escape(title)));
+        }
+
+        // Single author vs list
+        if meta.authors.len() == 1 {
+            ctx.insert(
+                "author-single".into(),
+                TemplateValue::Str(yaml_escape(&meta.authors[0].name)),
+            );
+        } else if meta.authors.len() > 1 {
+            let list: Vec<TemplateValue> = meta
+                .authors
+                .iter()
+                .map(|a| {
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("name".into(), TemplateValue::Str(yaml_escape(&a.name)));
+                    let has_details =
+                        a.affiliation.is_some() || a.email.is_some() || a.orcid.is_some();
+                    map.insert("has-details".into(), TemplateValue::Bool(has_details));
+                    if let Some(aff) = &a.affiliation {
+                        map.insert("affiliation".into(), TemplateValue::Str(yaml_escape(aff)));
+                    }
+                    if let Some(email) = &a.email {
+                        map.insert("email".into(), TemplateValue::Str(yaml_escape(email)));
+                    }
+                    if let Some(orcid) = &a.orcid {
+                        map.insert("orcid".into(), TemplateValue::Str(yaml_escape(orcid)));
+                    }
+                    TemplateValue::Map(map)
+                })
+                .collect();
+            ctx.insert("author-list".into(), TemplateValue::List(list));
+        }
+
+        if let Some(date) = &meta.date {
+            ctx.insert("date".into(), TemplateValue::Str(yaml_escape(date)));
+        }
+
+        if let Some(abstract_blocks) = &meta.abstract_text {
+            let text = blocks_to_plain_text(abstract_blocks);
+            ctx.insert("abstract".into(), TemplateValue::Str(yaml_escape(&text)));
+        }
+
+        if !meta.keywords.is_empty() {
+            let kw_list: Vec<TemplateValue> = meta
+                .keywords
+                .iter()
+                .map(|k| TemplateValue::Str(yaml_escape(k)))
+                .collect();
+            ctx.insert("keyword".into(), TemplateValue::List(kw_list));
+        }
+
+        if !meta.custom.is_empty() {
+            let mut custom_yaml = String::new();
+            for (k, v) in &meta.custom {
+                write_meta_value(&mut custom_yaml, k, v, 0);
+            }
+            ctx.insert("custom-meta".into(), TemplateValue::Str(custom_yaml));
+        }
+
+        ctx
     }
 }
 
@@ -691,7 +714,7 @@ impl Writer for MarkdownWriter {
         self.write_blocks(&doc.content, &mut body, &ctx);
 
         if opts.standalone {
-            Ok(self.wrap_standalone(&body, doc))
+            self.wrap_standalone(&body, doc)
         } else {
             Ok(body)
         }
