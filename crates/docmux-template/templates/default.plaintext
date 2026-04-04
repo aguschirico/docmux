@@ -1,1 +1,12 @@
-$body$
+$if(title)$$title$
+$title-underline$
+
+$endif$$if(author-line)$$author-line$
+
+$endif$$if(date)$$date$
+
+$endif$$if(abstract)$Abstract
+--------
+
+$abstract$
+$endif$$body$
