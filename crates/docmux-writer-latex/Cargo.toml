@@ -11,3 +11,4 @@ rust-version.workspace = true
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
 docmux-highlight = { workspace = true }
+docmux-template = { workspace = true }

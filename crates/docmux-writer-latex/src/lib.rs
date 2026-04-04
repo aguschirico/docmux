@@ -441,61 +441,68 @@ impl LatexWriter {
         }
     }
 
-    fn wrap_standalone(&self, body: &str, doc: &Document, opts: &WriteOptions) -> String {
-        let mut preamble = String::with_capacity(1024);
+    fn wrap_standalone(
+        &self,
+        body: &str,
+        doc: &Document,
+        opts: &WriteOptions,
+    ) -> docmux_core::Result<String> {
+        let template_src = match &opts.template {
+            Some(path) => std::fs::read_to_string(path)?,
+            None => docmux_template::DEFAULT_LATEX.to_string(),
+        };
+        let ctx = self.build_template_context(body, doc, opts);
+        docmux_template::render(&template_src, &ctx).map_err(docmux_core::ConvertError::from)
+    }
 
-        preamble.push_str("\\documentclass{article}\n");
-        preamble.push_str("\\usepackage[utf8]{inputenc}\n");
-        preamble.push_str("\\usepackage[T1]{fontenc}\n");
-        preamble.push_str("\\usepackage{amsmath,amssymb}\n");
-        preamble.push_str("\\usepackage{graphicx}\n");
-        preamble.push_str("\\usepackage{hyperref}\n");
-        preamble.push_str("\\usepackage{listings}\n");
-        preamble.push_str("\\usepackage{alltt}\n");
-        preamble.push_str("\\usepackage{xcolor}\n");
-        preamble.push_str("\\usepackage[normalem]{ulem}\n"); // for \sout (strikethrough)
+    fn build_template_context(
+        &self,
+        body: &str,
+        doc: &Document,
+        opts: &WriteOptions,
+    ) -> docmux_template::TemplateContext {
+        use docmux_template::TemplateValue;
+        let mut ctx = docmux_template::TemplateContext::new();
+
+        ctx.insert("body".into(), TemplateValue::Str(body.to_string()));
 
         if let Some(title) = &doc.metadata.title {
-            preamble.push_str(&format!("\\title{{{}}}\n", escape_latex(title)));
+            ctx.insert("title".into(), TemplateValue::Str(escape_latex(title)));
         }
 
         if !doc.metadata.authors.is_empty() {
-            let authors: Vec<String> = doc
+            let author_list: Vec<TemplateValue> = doc
                 .metadata
                 .authors
                 .iter()
                 .map(|a| {
-                    let mut s = escape_latex(&a.name);
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("name".into(), TemplateValue::Str(escape_latex(&a.name)));
                     if let Some(aff) = &a.affiliation {
-                        s.push_str(&format!(" \\\\ {}", escape_latex(aff)));
+                        map.insert("affiliation".into(), TemplateValue::Str(escape_latex(aff)));
                     }
-                    s
+                    TemplateValue::Map(map)
                 })
                 .collect();
-            preamble.push_str(&format!("\\author{{{}}}\n", authors.join(" \\and ")));
+            ctx.insert("author".into(), TemplateValue::List(author_list));
         }
 
         if let Some(date) = &doc.metadata.date {
-            preamble.push_str(&format!("\\date{{{}}}\n", escape_latex(date)));
-        }
-
-        preamble.push_str("\n\\begin{document}\n");
-
-        if doc.metadata.title.is_some() {
-            preamble.push_str("\\maketitle\n");
+            ctx.insert("date".into(), TemplateValue::Str(escape_latex(date)));
         }
 
         if let Some(blocks) = &doc.metadata.abstract_text {
-            preamble.push_str("\\begin{abstract}\n");
-            self.write_blocks(blocks, opts, &mut preamble);
-            preamble.push_str("\\end{abstract}\n");
+            let mut abs_latex = String::new();
+            self.write_blocks(blocks, opts, &mut abs_latex);
+            ctx.insert("abstract".into(), TemplateValue::Str(abs_latex));
         }
 
-        preamble.push('\n');
-        preamble.push_str(body);
-        preamble.push_str("\\end{document}\n");
+        // Merge user variables
+        for (k, v) in &opts.variables {
+            ctx.insert(k.clone(), TemplateValue::Str(v.clone()));
+        }
 
-        preamble
+        ctx
     }
 }
 
@@ -513,7 +520,7 @@ impl Writer for LatexWriter {
         self.write_blocks(&doc.content, opts, &mut body);
 
         if opts.standalone {
-            Ok(self.wrap_standalone(&body, doc, opts))
+            self.wrap_standalone(&body, doc, opts)
         } else {
             Ok(body)
         }
