@@ -431,14 +431,26 @@ impl PlaintextWriter {
         }
     }
 
-    fn write_standalone_header(&self, doc: &Document, out: &mut String) {
+    fn wrap_standalone(&self, body: &str, doc: &Document) -> docmux_core::Result<String> {
+        let template_src = docmux_template::DEFAULT_PLAINTEXT.to_string();
+        let ctx = self.build_template_context(body, doc);
+        docmux_template::render(&template_src, &ctx).map_err(docmux_core::ConvertError::from)
+    }
+
+    fn build_template_context(
+        &self,
+        body: &str,
+        doc: &Document,
+    ) -> docmux_template::TemplateContext {
+        use docmux_template::TemplateValue;
+        let mut ctx = docmux_template::TemplateContext::new();
+
+        ctx.insert("body".into(), TemplateValue::Str(body.to_string()));
+
         if let Some(title) = &doc.metadata.title {
-            out.push_str(title);
-            out.push('\n');
-            for _ in 0..title.len() {
-                out.push('=');
-            }
-            out.push_str("\n\n");
+            ctx.insert("title".into(), TemplateValue::Str(title.clone()));
+            let underline = "=".repeat(title.len());
+            ctx.insert("title-underline".into(), TemplateValue::Str(underline));
         }
 
         if !doc.metadata.authors.is_empty() {
@@ -448,19 +460,20 @@ impl PlaintextWriter {
                 .iter()
                 .map(|a| a.name.as_str())
                 .collect();
-            out.push_str(&names.join(", "));
-            out.push_str("\n\n");
+            ctx.insert("author-line".into(), TemplateValue::Str(names.join(", ")));
         }
 
         if let Some(date) = &doc.metadata.date {
-            out.push_str(date);
-            out.push_str("\n\n");
+            ctx.insert("date".into(), TemplateValue::Str(date.clone()));
         }
 
         if let Some(abstract_blocks) = &doc.metadata.abstract_text {
-            out.push_str("Abstract\n--------\n\n");
-            self.write_blocks(abstract_blocks, out, "");
+            let mut abs_text = String::new();
+            self.write_blocks(abstract_blocks, &mut abs_text, "");
+            ctx.insert("abstract".into(), TemplateValue::Str(abs_text));
         }
+
+        ctx
     }
 }
 
@@ -474,16 +487,17 @@ impl Writer for PlaintextWriter {
     }
 
     fn write(&self, doc: &Document, opts: &WriteOptions) -> Result<String> {
-        let mut out = String::with_capacity(4096);
+        let mut body = String::with_capacity(4096);
+        self.write_blocks(&doc.content, &mut body, "");
 
-        if opts.standalone {
-            self.write_standalone_header(doc, &mut out);
-        }
-
-        self.write_blocks(&doc.content, &mut out, "");
+        let content = if opts.standalone {
+            self.wrap_standalone(&body, doc)?
+        } else {
+            body
+        };
 
         // Trim trailing whitespace/newlines from the final output.
-        let trimmed = out.trim_end().to_string();
+        let trimmed = content.trim_end().to_string();
         Ok(if trimmed.is_empty() {
             trimmed
         } else {
