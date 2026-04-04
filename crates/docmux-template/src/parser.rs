@@ -9,7 +9,6 @@ pub(crate) type VarPath = Vec<String>;
 
 /// A node in the parsed template AST.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // fields will be used by renderer (Task 3)
 pub(crate) enum TemplateNode {
     /// Literal text (passed through as-is).
     Literal(String),
