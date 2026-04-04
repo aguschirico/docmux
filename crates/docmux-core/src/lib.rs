@@ -7,6 +7,7 @@
 //! chains them together.
 
 use docmux_ast::Document;
+use docmux_template::TemplateError;
 use std::collections::HashMap;
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
@@ -33,6 +34,10 @@ pub enum ConvertError {
     /// A catch-all for other errors.
     #[error("{0}")]
     Other(String),
+
+    /// A template rendering error.
+    #[error("template error: {0}")]
+    Template(#[from] TemplateError),
 }
 
 /// Convenience alias.

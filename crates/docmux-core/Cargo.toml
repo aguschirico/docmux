@@ -9,4 +9,5 @@ rust-version.workspace = true
 
 [dependencies]
 docmux-ast = { workspace = true }
+docmux-template = { workspace = true }
 thiserror = { workspace = true }
