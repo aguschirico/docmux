@@ -72,7 +72,7 @@
 - [x] `--top-level-division=section|chapter|part`
 - [x] `--wrap=auto|none|preserve`, `--columns=N`
 - [x] `--eol=crlf|lf|native`
-- [ ] `--template=FILE` with template engine
+- [x] `--template=FILE` with template engine
 - [ ] `--bibliography=FILE`, `--csl=FILE`
 - [x] `--highlight-style=STYLE`, `--list-highlight-themes`, `--list-highlight-languages`
 - [x] `--section-divs`, `--id-prefix=PREFIX`
@@ -103,8 +103,8 @@
 
 ### Template system
 
-- [ ] Template engine (variable interpolation, conditionals, loops)
-- [ ] Built-in default templates per output format
+- [x] Template engine (variable interpolation, conditionals, loops) — `docmux-template` crate, 33 tests
+- [x] Built-in default templates per output format (HTML, LaTeX, Markdown, Plaintext)
 
 ### Syntax highlighting
 
