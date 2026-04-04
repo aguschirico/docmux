@@ -369,3 +369,124 @@ fn docx_to_stdout_errors() {
         "expected binary format error, got: {stderr}"
     );
 }
+
+// ─── Template tests ─────────────────────────────────────────────────────────
+
+#[test]
+fn print_default_template_html() {
+    let output = Command::new(docmux_bin())
+        .arg("--print-default-template=html")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(output.status.success(), "exit code was non-zero");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("$body$"),
+        "expected $body$ in template, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("<!DOCTYPE html>"),
+        "expected HTML doctype in template"
+    );
+}
+
+#[test]
+fn print_default_template_latex() {
+    let output = Command::new(docmux_bin())
+        .arg("--print-default-template=latex")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\\documentclass"));
+    assert!(stdout.contains("$body$"));
+}
+
+#[test]
+fn print_default_template_unknown_format_fails() {
+    let output = Command::new(docmux_bin())
+        .arg("--print-default-template=unknown")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no default template"));
+}
+
+#[test]
+fn custom_template_flag() {
+    let input = fixtures_dir().join("basic/paragraph.md");
+    let tmp_dir = std::env::temp_dir().join("docmux-template-test");
+    std::fs::create_dir_all(&tmp_dir).ok();
+
+    // Write a minimal custom template
+    let template_file = tmp_dir.join("custom.html");
+    std::fs::write(&template_file, "<custom>$body$</custom>").expect("failed to write template");
+
+    let output = Command::new(docmux_bin())
+        .arg(&input)
+        .arg("-t")
+        .arg("html")
+        .arg("--template")
+        .arg(&template_file)
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(output.status.success(), "exit code was non-zero");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<custom>"),
+        "expected custom template wrapper, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("<p>"),
+        "expected rendered body content in output"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn template_implies_standalone() {
+    let input = fixtures_dir().join("basic/paragraph.md");
+    let tmp_dir = std::env::temp_dir().join("docmux-template-test-standalone");
+    std::fs::create_dir_all(&tmp_dir).ok();
+
+    let template_file = tmp_dir.join("minimal.html");
+    std::fs::write(&template_file, "HEADER\n$body$\nFOOTER").expect("write template");
+
+    let output = Command::new(docmux_bin())
+        .arg(&input)
+        .arg("-t")
+        .arg("html")
+        .arg("--template")
+        .arg(&template_file)
+        // Note: no --standalone flag, but --template implies it
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("HEADER"), "template wrapper expected");
+    assert!(stdout.contains("FOOTER"), "template wrapper expected");
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn template_nonexistent_file_fails() {
+    let input = fixtures_dir().join("basic/paragraph.md");
+    let output = Command::new(docmux_bin())
+        .arg(&input)
+        .arg("-t")
+        .arg("html")
+        .arg("--template")
+        .arg("/nonexistent/template.html")
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(!output.status.success());
+}
