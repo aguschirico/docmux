@@ -14,7 +14,7 @@ pub(crate) fn render(
 
 fn render_nodes(
     nodes: &[TemplateNode],
-    ctx: &TemplateContext,
+    _ctx: &TemplateContext,
     out: &mut String,
 ) -> Result<(), TemplateError> {
     for node in nodes {
