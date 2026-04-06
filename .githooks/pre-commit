@@ -29,6 +29,7 @@ while IFS= read -r file; do
         crates/docmux-wasm/*) WASM_CHANGED=true; RUST_CHANGED=true ;;
         *.rs) RUST_CHANGED=true ;;
         playground/*.ts|playground/*.tsx) TS_CHANGED=true ;;
+        npm/src/*.ts) TS_CHANGED=true; WASM_CHANGED=true ;;
     esac
 done <<< "$STAGED"
 
@@ -89,6 +90,13 @@ if [ "$WASM_CHANGED" = true ]; then
         pass "wasm32 build"
     else
         fail "wasm32 build — WASM crate doesn't compile"
+    fi
+
+    # Full wasm-pack build to keep npm package in sync
+    if npm/scripts/build.sh >/dev/null 2>&1; then
+        pass "wasm-pack dual build"
+    else
+        warn "wasm-pack build failed — npm package may be stale"
     fi
 fi
 
