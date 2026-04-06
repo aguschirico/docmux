@@ -13,7 +13,7 @@
     ".": {
       "node": {
         "import": "./dist/index.node.js",
-        "types": "./dist/index.d.ts"
+        "types": "./dist/index.node.d.ts"
       },
       "default": {
         "import": "./dist/index.js",
