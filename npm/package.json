@@ -1,0 +1,51 @@
+{
+  "name": "@docmux/wasm",
+  "version": "0.1.0",
+  "description": "Universal document converter — WASM bindings for docmux",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aguschirico/docmux",
+    "directory": "npm"
+  },
+  "exports": {
+    ".": {
+      "node": {
+        "import": "./dist/index.node.js",
+        "types": "./dist/index.d.ts"
+      },
+      "default": {
+        "import": "./dist/index.js",
+        "types": "./dist/index.d.ts"
+      }
+    },
+    "./raw": {
+      "node": {
+        "import": "./node/docmux_wasm.js",
+        "types": "./node/docmux_wasm.d.ts"
+      },
+      "default": {
+        "import": "./bundler/docmux_wasm.js",
+        "types": "./bundler/docmux_wasm.d.ts"
+      }
+    }
+  },
+  "files": [
+    "dist/",
+    "bundler/",
+    "node/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:wasm": "./scripts/build.sh",
+    "build:ts": "tsc",
+    "build": "pnpm run build:wasm && pnpm run build:ts",
+    "publish-wasm": "pnpm run build && npm publish --access public"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  },
+  "sideEffects": false
+}

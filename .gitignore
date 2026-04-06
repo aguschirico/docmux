@@ -11,3 +11,6 @@ playground/wasm-pkg/
 /.playwright-mcp
 CLAUDE.local.md
 .claude/settings.local.json
+npm/bundler/
+npm/node/
+npm/dist/
