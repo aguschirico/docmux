@@ -39,7 +39,7 @@ export function useConversion(
   binaryContent?: Uint8Array | null,
 ): ConversionState {
   const [state, setState] = useState<ConversionState>(INITIAL);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const seqRef = useRef(0);
 
   const hasBinary = binaryContent != null && binaryContent.length > 0 && inputFormat !== null;

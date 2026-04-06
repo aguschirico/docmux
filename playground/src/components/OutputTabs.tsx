@@ -91,7 +91,7 @@ export function OutputTabs() {
             Source
           </TabsTrigger>
           <div className="ml-0.5">
-            <Select value={outputFormat} onValueChange={setOutputFormat}>
+            <Select value={outputFormat} onValueChange={(v) => { if (v !== null) setOutputFormat(v); }}>
               <SelectTrigger className="h-5 w-24 border-zinc-700 bg-zinc-900 text-[10px]">
                 <SelectValue />
               </SelectTrigger>

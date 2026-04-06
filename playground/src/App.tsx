@@ -49,7 +49,7 @@ function Layout() {
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       <Header />
       <ResizablePanelGroup
-        direction="horizontal"
+        orientation="horizontal"
         className="flex-1 overflow-hidden"
       >
         <ResizablePanel defaultSize="200px" minSize="160px" maxSize="350px">
