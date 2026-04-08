@@ -11,6 +11,7 @@ use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
+use docmux_transform_cite::CiteTransform;
 use docmux_transform_number_sections::NumberSectionsTransform;
 use docmux_transform_section_divs::SectionDivsTransform;
 use docmux_transform_toc::TocTransform;
@@ -127,6 +128,14 @@ struct Cli {
     /// Wrap sections (heading + content) in <div> containers
     #[arg(long)]
     section_divs: bool,
+
+    /// Bibliography file(s) — BibTeX (.bib) or Hayagriva YAML (.yml/.yaml)
+    #[arg(long, value_name = "FILE")]
+    bibliography: Vec<PathBuf>,
+
+    /// CSL citation style file (default: Chicago Author-Date)
+    #[arg(long, value_name = "FILE")]
+    csl: Option<PathBuf>,
 
     /// Custom template file (implies --standalone)
     #[arg(long, value_name = "FILE")]
@@ -340,6 +349,110 @@ fn main() {
             .insert("toc-depth".to_string(), cli.toc_depth.to_string());
         if let Err(e) = TocTransform::new().transform(&mut doc, &ctx) {
             eprintln!("docmux: toc error: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    // Apply cite transform (when --bibliography is provided or metadata has bibliography)
+    let bib_paths: Vec<PathBuf> = if !cli.bibliography.is_empty() {
+        cli.bibliography.clone()
+    } else if let Some(docmux_ast::MetaValue::String(bib_path)) =
+        doc.metadata.custom.get("bibliography")
+    {
+        vec![PathBuf::from(bib_path)]
+    } else if let Some(docmux_ast::MetaValue::List(bib_list)) =
+        doc.metadata.custom.get("bibliography")
+    {
+        bib_list
+            .iter()
+            .filter_map(|v| {
+                if let docmux_ast::MetaValue::String(s) = v {
+                    Some(PathBuf::from(s))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    if !bib_paths.is_empty() {
+        // Load all bibliography files into one library
+        let mut combined = hayagriva::Library::new();
+        for path in &bib_paths {
+            let content = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "docmux: cannot read bibliography file {}: {e}",
+                        path.display()
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let lib = match ext {
+                "bib" => match hayagriva::io::from_biblatex_str(&content) {
+                    Ok(lib) => lib,
+                    Err(e) => {
+                        eprintln!("docmux: BibTeX parse error in {}: {e:?}", path.display());
+                        std::process::exit(1);
+                    }
+                },
+                "yml" | "yaml" => match hayagriva::io::from_yaml_str(&content) {
+                    Ok(lib) => lib,
+                    Err(e) => {
+                        eprintln!(
+                            "docmux: YAML bibliography parse error in {}: {e}",
+                            path.display()
+                        );
+                        std::process::exit(1);
+                    }
+                },
+                other => {
+                    eprintln!(
+                        "docmux: unsupported bibliography format '.{other}' \
+                         (expected .bib, .yml, or .yaml)"
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            for entry in lib.iter() {
+                combined.push(entry);
+            }
+        }
+
+        // Resolve CSL style path: CLI flag > metadata > default (None = built-in)
+        let csl_file = cli.csl.clone().or_else(|| {
+            doc.metadata.custom.get("csl").and_then(|v| match v {
+                docmux_ast::MetaValue::String(s) => Some(PathBuf::from(s)),
+                _ => None,
+            })
+        });
+
+        let csl_xml = match &csl_file {
+            Some(path) => match std::fs::read_to_string(path) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    eprintln!("docmux: cannot read CSL file {}: {e}", path.display());
+                    std::process::exit(1);
+                }
+            },
+            None => None, // will use built-in chicago-author-date
+        };
+
+        let cite_transform = match CiteTransform::with_library(combined, csl_xml.as_deref()) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("docmux: cite transform init error: {e}");
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = cite_transform.transform(&mut doc, &TransformContext::default()) {
+            eprintln!("docmux: cite transform error: {e}");
             std::process::exit(1);
         }
     }
