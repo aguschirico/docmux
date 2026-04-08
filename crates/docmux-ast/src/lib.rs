@@ -450,7 +450,7 @@ impl Citation {
 }
 
 /// How the citation should be rendered.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CitationMode {
     /// Parenthetical: (Smith, 2020)
     #[default]

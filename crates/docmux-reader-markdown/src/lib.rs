@@ -7,13 +7,17 @@
 //! [`Metadata`] struct. Known fields (`title`, `author`, `date`, `abstract`)
 //! are extracted into typed fields; everything else goes into `custom`.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+
 use comrak::{
     nodes::{AstNode, NodeValue},
     parse_document, Arena, Options,
 };
+use regex::Regex;
+
 use docmux_ast::*;
 use docmux_core::{Reader, Result};
-use std::collections::{HashMap, HashSet};
 
 /// A Markdown reader backed by comrak.
 #[derive(Debug, Default)]
@@ -364,6 +368,7 @@ impl MarkdownReader {
         }
         postprocess_raw_inlines(&mut inlines);
         postprocess_bracketed_spans(&mut inlines);
+        postprocess_citations(&mut inlines);
         inlines
     }
 
@@ -1185,6 +1190,155 @@ fn yaml_to_meta_value(val: &serde_yaml::Value) -> Option<MetaValue> {
         }
         _ => None,
     }
+}
+
+// ─── Citation parsing (pandoc-style) ───────────────────────────────────────
+
+/// Full bracketed citation pattern — matches the entire `[...]` block containing @key.
+static FULL_BRACKET_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[([^\[\]]*@[\w:.#$%&\-+?<>~/]+[^\[\]]*)\]").expect("valid regex")
+});
+
+/// A single cite item within brackets: optional prefix, optional `-`, `@key`, optional suffix.
+static CITE_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|;\s*)([^@;]*?)(-?)@([\w:.#$%&\-+?<>~/]+)([^;]*)").expect("valid regex")
+});
+
+/// Inline narrative citation: `@key` (boundary checked in code, not via lookbehind).
+static NARRATIVE_CITE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@([\w:.#$%&\-+?<>~/]+)").expect("valid regex"));
+
+/// Walk inline nodes and replace text containing citation syntax with
+/// `Inline::Citation` nodes. Text before/after the citation is preserved.
+fn postprocess_citations(inlines: &mut Vec<Inline>) {
+    let mut i = 0;
+    while i < inlines.len() {
+        if let Inline::Text { value } = &inlines[i] {
+            if let Some(replacements) = parse_citations_in_text(value) {
+                inlines.splice(i..=i, replacements.into_iter());
+                continue; // re-check at same index
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Try to parse a bracketed citation from `text`. Returns `None` if no bracketed citation found.
+fn parse_bracketed_citation_from_text(text: &str) -> Option<Vec<Inline>> {
+    let m = FULL_BRACKET_RE.find(text)?;
+    let mut result = Vec::new();
+
+    let before = &text[..m.start()];
+    if !before.is_empty() {
+        result.push(Inline::Text {
+            value: before.to_string(),
+        });
+    }
+
+    let bracket_content = &text[m.start() + 1..m.end() - 1]; // strip [ and ]
+    result.push(Inline::Citation(parse_bracketed_citation(bracket_content)));
+
+    let after = &text[m.end()..];
+    if !after.is_empty() {
+        if let Some(more) = parse_citations_in_text(after) {
+            result.extend(more);
+        } else {
+            result.push(Inline::Text {
+                value: after.to_string(),
+            });
+        }
+    }
+
+    Some(result)
+}
+
+/// Try to parse a narrative citation (`@key`) from `text`. Returns `None` if none found.
+fn parse_narrative_citation_from_text(text: &str) -> Option<Vec<Inline>> {
+    let m = NARRATIVE_CITE_RE.find(text)?;
+
+    let before_char = if m.start() > 0 {
+        text[..m.start()].chars().last()
+    } else {
+        None
+    };
+    if before_char.is_some_and(|c| c.is_alphanumeric() || c == '[') {
+        return None; // email address or bracketed context, skip
+    }
+
+    let mut result = Vec::new();
+    let before = &text[..m.start()];
+    if !before.is_empty() {
+        result.push(Inline::Text {
+            value: before.to_string(),
+        });
+    }
+
+    let key = &text[m.start() + 1..m.end()]; // skip @
+    result.push(Inline::Citation(Citation {
+        items: vec![CiteItem {
+            key: key.to_string(),
+            prefix: None,
+            suffix: None,
+        }],
+        mode: CitationMode::AuthorOnly,
+    }));
+
+    let after = &text[m.end()..];
+    if !after.is_empty() {
+        if let Some(more) = parse_citations_in_text(after) {
+            result.extend(more);
+        } else {
+            result.push(Inline::Text {
+                value: after.to_string(),
+            });
+        }
+    }
+
+    Some(result)
+}
+
+/// Try to parse citation(s) from a text string. Returns `None` if no citations found.
+fn parse_citations_in_text(text: &str) -> Option<Vec<Inline>> {
+    parse_bracketed_citation_from_text(text).or_else(|| parse_narrative_citation_from_text(text))
+}
+
+/// Parse the content inside `[...]` into a `Citation`.
+fn parse_bracketed_citation(content: &str) -> Citation {
+    let mut items = Vec::new();
+    let mut has_suppress = false;
+
+    for cap in CITE_ITEM_RE.captures_iter(content) {
+        let prefix_raw = cap[1].trim();
+        let suppress = &cap[2] == "-";
+        let key = cap[3].to_string();
+        let suffix_raw = cap[4].trim().trim_start_matches(',').trim();
+
+        if suppress {
+            has_suppress = true;
+        }
+
+        items.push(CiteItem {
+            key,
+            prefix: if prefix_raw.is_empty() {
+                None
+            } else {
+                Some(prefix_raw.to_string())
+            },
+            suffix: if suffix_raw.is_empty() {
+                None
+            } else {
+                Some(suffix_raw.to_string())
+            },
+        });
+    }
+
+    let mode = if has_suppress {
+        CitationMode::SuppressAuthor
+    } else {
+        CitationMode::Normal
+    };
+
+    Citation { items, mode }
 }
 
 #[cfg(test)]
@@ -2110,4 +2264,113 @@ mod tests {
             .collect();
         assert_eq!(ids, vec!["sec-hello", "sec-hello-1"]);
     }
+
+    // ─── Citation tests ────────────────────────────────────────────────────
+
+    /// Helper: extract inlines from the first paragraph.
+    fn first_para_inlines(doc: &Document) -> &[Inline] {
+        match &doc.content[0] {
+            Block::Paragraph { content, .. } => content,
+            other => panic!("expected Paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn citation_single_key() {
+        let doc = MarkdownReader::new().read("See [@smith2020].").unwrap();
+        let inlines = first_para_inlines(&doc);
+        // "See " + Citation + "."
+        assert_eq!(inlines.len(), 3);
+        match &inlines[1] {
+            Inline::Citation(c) => {
+                assert_eq!(c.items.len(), 1);
+                assert_eq!(c.items[0].key, "smith2020");
+                assert_eq!(c.mode, CitationMode::Normal);
+            }
+            other => panic!("expected Citation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn citation_multi_key() {
+        let doc = MarkdownReader::new()
+            .read("[@smith2020; @jones2021]")
+            .unwrap();
+        let inlines = first_para_inlines(&doc);
+        assert_eq!(inlines.len(), 1);
+        match &inlines[0] {
+            Inline::Citation(c) => {
+                assert_eq!(c.items.len(), 2);
+                assert_eq!(c.items[0].key, "smith2020");
+                assert_eq!(c.items[1].key, "jones2021");
+            }
+            other => panic!("expected Citation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn citation_suppress_author() {
+        let doc = MarkdownReader::new().read("[-@smith2020]").unwrap();
+        let inlines = first_para_inlines(&doc);
+        match &inlines[0] {
+            Inline::Citation(c) => {
+                assert_eq!(c.items[0].key, "smith2020");
+                assert_eq!(c.mode, CitationMode::SuppressAuthor);
+            }
+            other => panic!("expected Citation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn citation_with_prefix_suffix() {
+        let doc = MarkdownReader::new()
+            .read("[see @smith2020, p. 42]")
+            .unwrap();
+        let inlines = first_para_inlines(&doc);
+        match &inlines[0] {
+            Inline::Citation(c) => {
+                assert_eq!(c.items[0].key, "smith2020");
+                assert_eq!(c.items[0].prefix.as_deref(), Some("see"));
+                assert_eq!(c.items[0].suffix.as_deref(), Some("p. 42"));
+            }
+            other => panic!("expected Citation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn citation_narrative_inline() {
+        let doc = MarkdownReader::new().read("As @smith2020 argues").unwrap();
+        let inlines = first_para_inlines(&doc);
+        // "As " + Citation + " argues"
+        assert_eq!(inlines.len(), 3);
+        match &inlines[1] {
+            Inline::Citation(c) => {
+                assert_eq!(c.items[0].key, "smith2020");
+                assert_eq!(c.mode, CitationMode::AuthorOnly);
+            }
+            other => panic!("expected Citation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn citation_no_false_positive_email() {
+        let doc = MarkdownReader::new()
+            .read("Contact user@example.com for info.")
+            .unwrap();
+        let inlines = first_para_inlines(&doc);
+        for inline in inlines {
+            assert!(
+                !matches!(inline, Inline::Citation(_)),
+                "email wrongly parsed as citation"
+            );
+        }
+    }
+}
+
+// TEMP TEST - will remove
+#[test]
+#[ignore]
+fn temp_citation_in_link_text() {
+    let doc = MarkdownReader::new().read("See [text @foo](url)").unwrap();
+    eprintln!("{:?}", doc.content);
 }

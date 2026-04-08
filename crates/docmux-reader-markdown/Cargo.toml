@@ -11,5 +11,6 @@ rust-version.workspace = true
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
 comrak = { workspace = true }
+regex = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
