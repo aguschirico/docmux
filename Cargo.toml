@@ -72,6 +72,9 @@ syntect = { version = "5", default-features = false, features = ["default-syntax
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
 base64 = "0.22"
+hayagriva = { version = "0.9", default-features = false, features = ["biblatex"] }
+citationberg = "0.6"
+regex = "1"
 
 [profile.release]
 lto = true

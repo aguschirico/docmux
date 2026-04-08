@@ -10,3 +10,5 @@ rust-version.workspace = true
 [dependencies]
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
+hayagriva = { workspace = true }
+citationberg = { workspace = true }
