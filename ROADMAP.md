@@ -89,6 +89,9 @@
 ### Transforms
 
 - [x] `docmux-transform-cite` — CSL citation processing
+  - [ ] Fix: embed `locales-en-US.xml` so dates render in citations (currently `(Smith )` instead of `(Smith 2020)`)
+  - [ ] Forward `CiteItem.prefix`/`suffix` to hayagriva (enables `(see Smith 2020, p. 42)`)
+  - [ ] `--nocite` flag
 - [x] `docmux-transform-toc` — table of contents generation (6 tests)
 - [x] `docmux-transform-number-sections` — heading numbering (7 tests)
 - [x] `docmux-transform-section-divs` — wrap sections in Div containers (7 tests)
