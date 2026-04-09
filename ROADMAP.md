@@ -1,6 +1,6 @@
 # docmux Roadmap
 
-> Last updated: 2026-03-25
+> Last updated: 2026-04-09
 
 ## Phase 1 — MVP (Markdown → HTML + LaTeX) ✅
 
@@ -89,7 +89,7 @@
 ### Transforms
 
 - [x] `docmux-transform-cite` — CSL citation processing
-  - [ ] Fix: embed `locales-en-US.xml` so dates render in citations (currently `(Smith )` instead of `(Smith 2020)`)
+  - [x] Fix: embed `locales-en-US.xml` so dates render in citations
   - [ ] Forward `CiteItem.prefix`/`suffix` to hayagriva (enables `(see Smith 2020, p. 42)`)
   - [ ] `--nocite` flag
 - [x] `docmux-transform-toc` — table of contents generation (6 tests)
@@ -116,7 +116,7 @@
 
 ### Packaging
 
-- [ ] `npm/` package — publishable `@docmux/wasm` with JS/TS wrapper
+- [x] `npm/` package — `@docmux/wasm` published with JS/TS wrapper, automated release
 
 ## Phase 4 — Extended Formats + Advanced Features
 
@@ -157,7 +157,8 @@
 
 - [ ] Emoji replacement (`:name:` → Unicode)
 - [ ] Encoding detection / BOM handling
-- [ ] Publish to crates.io + npm
+- [x] Publish to npm (automated via CI on tag push)
+- [ ] Publish to crates.io
 
 ## Phase 5 — Long Tail
 
