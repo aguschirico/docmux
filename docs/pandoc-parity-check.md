@@ -107,7 +107,7 @@
 | Math inline | `Math InlineMath Text` | `MathInline { value }` | **ok** | — | — |
 | Link | `Link Attr [Inline] Target` | `Link { url, title, content }` | **partial** — missing `Attr` | LOW | P3 |
 | Image | `Image Attr [Inline] Target` | `Image { url, alt, title }` | **partial** — `alt` is `String` not `Vec<Inline>` (loses formatting). Missing `Attr`. | MEDIUM | P3 |
-| Citation | `Cite [Citation] [Inline]` | `Citation { keys, prefix, suffix, mode }` | **partial** — pandoc has per-key prefix/suffix and rendered inline fallback. docmux has single prefix/suffix for the whole group. | MEDIUM | P3 |
+| Citation | `Cite [Citation] [Inline]` | `Citation { keys, prefix, suffix, mode }` | **ok** — per-key prefix/suffix via `CiteItem`; CSL rendering via `docmux-transform-cite` | — | — |
 | Footnote ref | `Note [Block]` | `FootnoteRef { id }` | **different design** — pandoc inlines content, docmux separates. Both valid. | — | — |
 | Cross-reference | _(none)_ | `CrossRef { target, form }` | **docmux extra** | — | — |
 | Raw inline | `RawInline Format Text` | `RawInline { format, content }` | **ok** | — | — |
@@ -204,7 +204,7 @@ ColumnSpec { alignment, width }
 | MetaInlines | `MetaInlines [Inline]` | **MISSING** from `MetaValue` | LOW | P4 |
 | MetaBlocks | `MetaBlocks [Block]` | **MISSING** from `MetaValue` | LOW | P4 |
 | Language/lang | `lang` metadata key | Not special-cased | LOW | P3 |
-| CSL fields | `csl`, `bibliography`, `nocite` | **MISSING** | Needed for cite transform | P3 |
+| CSL fields | `csl`, `bibliography`, `nocite` | **ok** — `csl` and `bibliography` read from frontmatter; CLI flags override | — |
 
 ---
 
@@ -235,8 +235,8 @@ ColumnSpec { alignment, width }
 | **Highlight style** | `--highlight-style=STYLE` | Syntax highlighting theme | P3 |
 | **No highlight** | `--no-highlight` | Disable syntax highlighting | P3 |
 | **Math engine** | `--katex` / `--mathjax` / `--mathml` | Choose math rendering | P2 |
-| **Bibliography** | `--bibliography=FILE` | Load .bib file | P3 |
-| **CSL style** | `--csl=FILE` | Citation style | P3 |
+| **Bibliography** | `--bibliography=FILE` | Load .bib file | **ok** |
+| **CSL style** | `--csl=FILE` | Citation style | **ok** |
 | **Self-contained** | `--self-contained` / `--embed-resources` | Inline all resources | P4 |
 | **Extract media** | `--extract-media=DIR` | Extract embedded media | P4 |
 | **Wrap mode** | `--wrap=auto\|none\|preserve` | Output line wrapping | P3 |

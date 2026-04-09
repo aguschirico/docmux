@@ -73,7 +73,7 @@
 - [x] `--wrap=auto|none|preserve`, `--columns=N`
 - [x] `--eol=crlf|lf|native`
 - [x] `--template=FILE` with template engine
-- [ ] `--bibliography=FILE`, `--csl=FILE`
+- [x] `--bibliography=FILE`, `--csl=FILE`
 - [x] `--highlight-style=STYLE`, `--list-highlight-themes`, `--list-highlight-languages`
 - [x] `--section-divs`, `--id-prefix=PREFIX`
 
@@ -88,7 +88,7 @@
 
 ### Transforms
 
-- [ ] `docmux-transform-cite` — CSL citation processing
+- [x] `docmux-transform-cite` — CSL citation processing
 - [x] `docmux-transform-toc` — table of contents generation (6 tests)
 - [x] `docmux-transform-number-sections` — heading numbering (7 tests)
 - [x] `docmux-transform-section-divs` — wrap sections in Div containers (7 tests)
