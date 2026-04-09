@@ -19,11 +19,12 @@
 //!
 //! This overwrites all `.html` files. Review the diff with `git diff` before committing.
 
-use docmux_core::{Reader, WriteOptions, Writer};
+use docmux_core::{Reader, Transform, TransformContext, WriteOptions, Writer};
 use docmux_reader_html::HtmlReader;
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_typst::TypstReader;
+use docmux_transform_cite::CiteTransform;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
@@ -49,7 +50,11 @@ fn update_mode() -> bool {
     std::env::var("DOCMUX_UPDATE_EXPECTATIONS").is_ok()
 }
 
-/// Recursively discover all `.md` files under `dir`.
+/// Directories that require special transform handling and are excluded from
+/// the generic discover functions. Each has its own dedicated golden test.
+const SPECIAL_FIXTURE_DIRS: &[&str] = &["citations"];
+
+/// Recursively discover all `.md` files under `dir`, skipping special dirs.
 fn discover_fixtures(dir: &Path) -> Vec<PathBuf> {
     let mut results = Vec::new();
     if !dir.is_dir() {
@@ -59,6 +64,14 @@ fn discover_fixtures(dir: &Path) -> Vec<PathBuf> {
         let entry = entry.expect("read dir entry");
         let path = entry.path();
         if path.is_dir() {
+            let dir_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            if SPECIAL_FIXTURE_DIRS.contains(&dir_name.as_str()) {
+                continue;
+            }
             results.extend(discover_fixtures(&path));
         } else if path.extension().is_some_and(|ext| ext == "md") {
             results.push(path);
@@ -729,6 +742,53 @@ fn golden_html_to_md() {
             count = failures.len(),
             details = failures.join("\n"),
         );
+    }
+}
+
+// ─── Citation golden test ──────────────────────────────────────────────────
+
+#[test]
+fn citation_basic_with_bibliography() {
+    let md_path = fixtures_dir().join("citations/basic.md");
+    let bib_path = fixtures_dir().join("citations/refs.bib");
+    let expected_path = fixtures_dir().join("citations/basic.html");
+
+    let input = std::fs::read_to_string(&md_path).expect("read citation fixture");
+    let bib_content = std::fs::read_to_string(&bib_path).expect("read bib fixture");
+
+    // Parse bibliography
+    let lib = hayagriva::io::from_biblatex_str(&bib_content).expect("parse bib");
+
+    // Read markdown
+    let reader = MarkdownReader::new();
+    let mut doc = reader.read(&input).expect("read markdown");
+
+    // Apply cite transform
+    let transform = CiteTransform::with_library(lib, None).expect("create cite transform");
+    transform
+        .transform(&mut doc, &TransformContext::default())
+        .expect("cite transform");
+
+    // Write HTML
+    let writer = HtmlWriter::new();
+    let opts = WriteOptions::default();
+    let actual = writer.write(&doc, &opts).expect("write html");
+
+    if update_mode() {
+        std::fs::write(&expected_path, &actual).expect("write expected");
+    } else if expected_path.exists() {
+        let expected = std::fs::read_to_string(&expected_path).expect("read expected");
+        assert_eq!(
+            actual.trim(),
+            expected.trim(),
+            "citation golden file mismatch: {}",
+            expected_path.display()
+        );
+    } else {
+        // Bootstrap: create the expected file
+        std::fs::create_dir_all(expected_path.parent().unwrap()).ok();
+        std::fs::write(&expected_path, &actual).expect("bootstrap expected");
+        eprintln!("bootstrapped: {}", expected_path.display());
     }
 }
 
