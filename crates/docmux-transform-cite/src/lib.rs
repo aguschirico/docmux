@@ -13,7 +13,7 @@
 
 use std::fmt::Write as _;
 
-use citationberg::IndependentStyle;
+use citationberg::{IndependentStyle, Locale, LocaleFile};
 use hayagriva::{
     BibliographyDriver, BibliographyRequest, CitationItem, CitationRequest, CitePurpose, Entry,
     Library, Rendered,
@@ -25,6 +25,9 @@ use docmux_core::{Result, Transform, TransformContext};
 /// The embedded default CSL style (Chicago Author-Date).
 const DEFAULT_CSL: &str = include_str!("chicago-author-date.csl");
 
+/// The embedded default CSL locale (en-US).
+const DEFAULT_LOCALE: &str = include_str!("locales-en-US.xml");
+
 // ─── Transform ──────────────────────────────────────────────────────────────
 
 /// Cite transform — resolves citations and inserts bibliography.
@@ -32,6 +35,7 @@ const DEFAULT_CSL: &str = include_str!("chicago-author-date.csl");
 pub struct CiteTransform {
     library: Library,
     style: IndependentStyle,
+    locales: Vec<Locale>,
 }
 
 impl CiteTransform {
@@ -42,7 +46,16 @@ impl CiteTransform {
         let xml = csl_xml.unwrap_or(DEFAULT_CSL);
         let style = IndependentStyle::from_xml(xml)
             .map_err(|e| docmux_core::ConvertError::Other(format!("CSL parse error: {e}")))?;
-        Ok(Self { library, style })
+
+        let locale_file = LocaleFile::from_xml(DEFAULT_LOCALE)
+            .map_err(|e| docmux_core::ConvertError::Other(format!("locale parse error: {e}")))?;
+        let locales = vec![Locale::from(locale_file)];
+
+        Ok(Self {
+            library,
+            style,
+            locales,
+        })
     }
 }
 
@@ -59,7 +72,8 @@ impl Transform for CiteTransform {
         }
 
         // Build the bibliography driver
-        let (cite_strings, formatted_bib) = run_driver(&groups, &self.library, &self.style);
+        let (cite_strings, formatted_bib) =
+            run_driver(&groups, &self.library, &self.style, &self.locales);
 
         // Pass 2: replace Inline::Citation nodes with formatted text
         let mut cite_idx: usize = 0;
@@ -202,8 +216,9 @@ fn run_driver(
     groups: &[CitationGroup],
     library: &Library,
     style: &IndependentStyle,
+    locales: &[Locale],
 ) -> (Vec<String>, Option<Vec<Block>>) {
-    let (result, sent_to_driver) = feed_driver(groups, library, style);
+    let (result, sent_to_driver) = feed_driver(groups, library, style, locales);
     let cite_strings = extract_cite_strings(&result, &sent_to_driver, groups);
     let bib_blocks = build_bib_blocks(&result);
     (cite_strings, bib_blocks)
@@ -214,6 +229,7 @@ fn feed_driver(
     groups: &[CitationGroup],
     library: &Library,
     style: &IndependentStyle,
+    locales: &[Locale],
 ) -> (Rendered, Vec<bool>) {
     let mut driver = BibliographyDriver::new();
     let mut sent_to_driver: Vec<bool> = Vec::with_capacity(groups.len());
@@ -223,7 +239,7 @@ fn feed_driver(
         if cite_items.is_empty() {
             sent_to_driver.push(false);
         } else {
-            let req = CitationRequest::from_items(cite_items, style, &[]);
+            let req = CitationRequest::from_items(cite_items, style, locales);
             driver.citation(req);
             sent_to_driver.push(true);
         }
@@ -232,7 +248,7 @@ fn feed_driver(
     let result = driver.finish(BibliographyRequest {
         style,
         locale: None,
-        locale_files: &[],
+        locale_files: locales,
     });
 
     (result, sent_to_driver)
@@ -521,11 +537,15 @@ smith2020:
                 "Expected Inline::Text, got {:?}",
                 &content[1]
             );
-            // Should contain "Smith" somewhere (Chicago author-date)
+            // Should contain author and year (Chicago author-date)
             if let Inline::Text { value } = &content[1] {
                 assert!(
-                    value.contains("Smith") || value.contains("smith"),
+                    value.contains("Smith"),
                     "Expected citation text containing 'Smith', got: {value}"
+                );
+                assert!(
+                    value.contains("2020"),
+                    "Expected citation text containing year '2020', got: {value}"
                 );
             }
         } else {

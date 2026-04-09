@@ -6,7 +6,7 @@ A universal document converter written in Rust. Architecture: **Reader → AST �
 
 ## Architecture
 
-- **Workspace layout**: 23 crates under `crates/`. Each reader/writer/transform is a separate crate. See root `Cargo.toml` for the full list.
+- **Workspace layout**: 24 crates under `crates/`. Each reader/writer/transform is a separate crate. See root `Cargo.toml` for the full list.
 - **AST design**: Rich typed nodes (13+ block types, 16+ inline types) — math, citations, cross-refs, admonitions, divs, underline are first-class. All strings are owned (`String`), no lifetimes in the public API.
 - **Crate boundaries**: Readers/writers/transforms depend only on `docmux-ast` + `docmux-core`. No cross-dependencies.
 - **Testing strategy**: Golden file tests + CLI smoke tests + per-crate unit tests. Update expectations with `DOCMUX_UPDATE_EXPECTATIONS=1 cargo test`.
