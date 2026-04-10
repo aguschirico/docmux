@@ -6,3 +6,4 @@
 pub mod latex_to_typst;
 pub mod tables;
 pub mod tokenizer;
+pub mod typst_to_latex;
