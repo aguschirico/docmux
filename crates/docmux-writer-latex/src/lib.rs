@@ -5,7 +5,7 @@
 
 use docmux_ast::*;
 use docmux_core::{MathEngine, Result, WriteOptions, Writer};
-use docmux_highlight::HighlightToken;
+use docmux_highlight::{HighlightToken, LineOptions};
 
 /// A LaTeX writer.
 #[derive(Debug, Default)]
@@ -48,19 +48,23 @@ impl LatexWriter {
                 out.push('\n');
             }
             Block::CodeBlock {
-                language, content, ..
+                language,
+                content,
+                attrs,
+                ..
             } => {
+                let line_opts = LineOptions::from_attrs(attrs.as_ref());
                 if let (Some(lang), Some(theme)) =
                     (language.as_deref(), opts.highlight_style.as_deref())
                 {
                     if let Ok(lines) = docmux_highlight::highlight(content, lang, theme) {
-                        write_highlighted_code(&lines, out);
+                        write_highlighted_code(&lines, &line_opts, out);
                     } else {
                         // Highlight failed — fall back to lstlisting
-                        write_lstlisting(language.as_deref(), content, out);
+                        write_lstlisting(language.as_deref(), content, &line_opts, out);
                     }
                 } else {
-                    write_lstlisting(language.as_deref(), content, out);
+                    write_lstlisting(language.as_deref(), content, &line_opts, out);
                 }
             }
             Block::MathBlock { content, label } => {
@@ -533,11 +537,26 @@ impl Writer for LatexWriter {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Write a code block using `\begin{lstlisting}...\end{lstlisting}`.
-fn write_lstlisting(language: Option<&str>, content: &str, out: &mut String) {
+fn write_lstlisting(
+    language: Option<&str>,
+    content: &str,
+    line_opts: &LineOptions,
+    out: &mut String,
+) {
+    let mut options: Vec<String> = Vec::new();
     if let Some(lang) = language {
-        out.push_str(&format!("\\begin{{lstlisting}}[language={}]\n", lang));
-    } else {
+        options.push(format!("language={lang}"));
+    }
+    if line_opts.number_lines {
+        options.push("numbers=left".into());
+        if line_opts.start_from != 1 {
+            options.push(format!("firstnumber={}", line_opts.start_from));
+        }
+    }
+    if options.is_empty() {
         out.push_str("\\begin{lstlisting}\n");
+    } else {
+        out.push_str(&format!("\\begin{{lstlisting}}[{}]\n", options.join(",")));
     }
     // Code blocks are verbatim — no escaping
     out.push_str(content);
@@ -549,26 +568,49 @@ fn write_lstlisting(language: Option<&str>, content: &str, out: &mut String) {
 
 /// Write syntax-highlighted code inside an `alltt` environment using
 /// `\textcolor[RGB]` commands for coloured tokens.
-fn write_highlighted_code(lines: &[Vec<HighlightToken>], out: &mut String) {
+fn write_highlighted_code(
+    lines: &[Vec<HighlightToken>],
+    line_opts: &LineOptions,
+    out: &mut String,
+) {
     out.push_str("\\begin{alltt}\n");
-    for line in lines {
-        for token in line {
-            let escaped = latex_escape_verbatim(&token.text);
-            let c = token.style.foreground;
-            let mut inner = format!("\\textcolor[RGB]{{{},{},{}}}{{", c.r, c.g, c.b);
-            inner.push_str(&escaped);
-            inner.push('}');
+    for (idx, line) in lines.iter().enumerate() {
+        let line_no = line_opts.start_from + idx as u32;
+        let highlight = line_opts.is_highlighted(line_no);
 
-            if token.style.bold {
-                inner = format!("\\textbf{{{inner}}}");
-            }
-            if token.style.italic {
-                inner = format!("\\textit{{{inner}}}");
-            }
-            out.push_str(&inner);
+        let mut line_content = String::new();
+        if line_opts.number_lines {
+            line_content.push_str(&format!("\\makebox[2em][r]{{{}}}\\;\\,", line_no));
+        }
+        for token in line {
+            line_content.push_str(&render_token(token));
+        }
+
+        if highlight {
+            // Strip trailing newline before wrapping, re-add after
+            let trimmed = line_content.trim_end_matches('\n');
+            out.push_str(&format!("\\colorbox{{yellow!15}}{{{trimmed}}}\n"));
+        } else {
+            out.push_str(&line_content);
         }
     }
     out.push_str("\\end{alltt}\n");
+}
+
+/// Render a single `HighlightToken` into its LaTeX representation.
+fn render_token(token: &HighlightToken) -> String {
+    let escaped = latex_escape_verbatim(&token.text);
+    let c = token.style.foreground;
+    let mut inner = format!("\\textcolor[RGB]{{{},{},{}}}{{", c.r, c.g, c.b);
+    inner.push_str(&escaped);
+    inner.push('}');
+    if token.style.bold {
+        inner = format!("\\textbf{{{inner}}}");
+    }
+    if token.style.italic {
+        inner = format!("\\textit{{{inner}}}");
+    }
+    inner
 }
 
 /// Escape characters that are special inside the `alltt` environment.
@@ -845,6 +887,68 @@ mod tests {
         assert!(
             tex.contains("\\begin{lstlisting}"),
             "expected lstlisting fallback for unknown language, got: {tex}"
+        );
+    }
+
+    #[test]
+    fn code_block_with_line_numbers_latex() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("python".into()),
+                content: "a = 1\nb = 2".into(),
+                attrs: Some(Attributes {
+                    id: None,
+                    classes: vec!["numberLines".into()],
+                    key_values: std::collections::HashMap::new(),
+                }),
+                caption: None,
+                label: None,
+            }],
+            metadata: Metadata::default(),
+            warnings: vec![],
+            resources: std::collections::HashMap::new(),
+            bibliography: None,
+        };
+        let writer = LatexWriter::new();
+        let opts = WriteOptions::default();
+        let latex = writer.write(&doc, &opts).unwrap();
+        // lstlisting path should have numbers=left
+        assert!(
+            latex.contains("numbers=left"),
+            "should have line numbers option"
+        );
+    }
+
+    #[test]
+    fn code_block_highlight_lines_latex() {
+        let mut kvs = std::collections::HashMap::new();
+        kvs.insert("highlight".into(), "2".into());
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("python".into()),
+                content: "a\nb\nc".into(),
+                attrs: Some(Attributes {
+                    id: None,
+                    classes: vec![],
+                    key_values: kvs,
+                }),
+                caption: None,
+                label: None,
+            }],
+            metadata: Metadata::default(),
+            warnings: vec![],
+            resources: std::collections::HashMap::new(),
+            bibliography: None,
+        };
+        let writer = LatexWriter::new();
+        let opts = WriteOptions {
+            highlight_style: Some("InspiredGitHub".into()),
+            ..Default::default()
+        };
+        let latex = writer.write(&doc, &opts).unwrap();
+        assert!(
+            latex.contains("colorbox"),
+            "highlighted line should use colorbox"
         );
     }
 }
