@@ -272,12 +272,57 @@ fn extract_cite_strings(
                     .map(|rc| format!("{:#}", rc.citation))
                     .unwrap_or_default();
                 driver_idx += 1;
-                text
+                apply_affixes(&text, &group.items)
             } else {
                 format_unresolved(group)
             }
         })
         .collect()
+}
+
+/// Apply prefix/suffix from cite items to the formatted citation string.
+///
+/// For single-item groups, prefix is prepended and suffix is appended.
+/// For multi-item groups, the first item's prefix is prepended and the last
+/// item's suffix is appended (matching pandoc behaviour for grouped citations).
+fn apply_affixes(text: &str, items: &[CiteItem]) -> String {
+    let prefix = items
+        .first()
+        .and_then(|item| item.prefix.as_deref())
+        .filter(|s| !s.is_empty());
+    let suffix = items
+        .last()
+        .and_then(|item| item.suffix.as_deref())
+        .filter(|s| !s.is_empty());
+
+    match (prefix, suffix) {
+        (Some(p), Some(s)) => format_with_prefix_suffix(p, text, s),
+        (Some(p), None) => format!("{p} {text}"),
+        (None, Some(s)) => format_with_suffix(text, s),
+        (None, None) => text.to_owned(),
+    }
+}
+
+/// Format citation text with both prefix and suffix.
+fn format_with_prefix_suffix(prefix: &str, text: &str, suffix: &str) -> String {
+    let suffix_sep = suffix_separator(suffix);
+    format!("{prefix} {text}{suffix_sep}{suffix}")
+}
+
+/// Format citation text with a suffix only.
+fn format_with_suffix(text: &str, suffix: &str) -> String {
+    let suffix_sep = suffix_separator(suffix);
+    format!("{text}{suffix_sep}{suffix}")
+}
+
+/// Return the separator to place before a suffix: empty if the suffix already
+/// starts with punctuation, otherwise `", "`.
+fn suffix_separator(suffix: &str) -> &'static str {
+    if suffix.starts_with(|c: char| c.is_ascii_punctuation()) {
+        " "
+    } else {
+        ", "
+    }
 }
 
 /// Build bibliography blocks from the driver result.
@@ -312,8 +357,6 @@ fn build_citation_items<'a>(
         .iter()
         .filter_map(|item| match library.get(&item.key) {
             Some(entry) => {
-                // TODO: forward CiteItem.prefix and CiteItem.suffix to hayagriva's
-                // CitationItem once we determine the correct API for CSL affixes.
                 let mut ci = CitationItem::with_entry(entry);
                 if let Some(p) = purpose {
                     ci.purpose = Some(p);
@@ -656,6 +699,133 @@ smith2020:
             )
             .count();
         assert_eq!(refs_count, 1, "Should have exactly one refs div");
+    }
+
+    #[test]
+    fn citation_with_prefix_suffix() {
+        let bib_yaml = r#"
+smith2020:
+    type: article
+    title: Test Article
+    author: Smith, John
+    date: 2020
+    parent:
+        type: periodical
+        title: Journal
+"#;
+        let lib = hayagriva::io::from_yaml_str(bib_yaml).unwrap();
+        let transform = CiteTransform::with_library(lib, None).unwrap();
+
+        let mut doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Citation(Citation {
+                    items: vec![CiteItem {
+                        key: "smith2020".into(),
+                        prefix: Some("see".into()),
+                        suffix: Some("p. 42".into()),
+                    }],
+                    mode: CitationMode::Normal,
+                })],
+            }],
+            ..Default::default()
+        };
+
+        transform
+            .transform(&mut doc, &TransformContext::default())
+            .unwrap();
+
+        let text = match &doc.content[0] {
+            Block::Paragraph { content } => match &content[0] {
+                Inline::Text { value } => value.clone(),
+                other => format!("{other:?}"),
+            },
+            other => format!("{other:?}"),
+        };
+
+        assert!(text.contains("see"), "should contain prefix 'see': {text}");
+        assert!(
+            text.contains("p. 42"),
+            "should contain suffix 'p. 42': {text}"
+        );
+    }
+
+    #[test]
+    fn citation_with_prefix_only() {
+        let lib = test_library();
+        let transform = CiteTransform::with_library(lib, None).unwrap();
+
+        let mut doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Citation(Citation {
+                    items: vec![CiteItem {
+                        key: "smith2020".into(),
+                        prefix: Some("see".into()),
+                        suffix: None,
+                    }],
+                    mode: CitationMode::Normal,
+                })],
+            }],
+            ..Default::default()
+        };
+
+        transform
+            .transform(&mut doc, &TransformContext::default())
+            .unwrap();
+
+        let text = match &doc.content[0] {
+            Block::Paragraph { content } => match &content[0] {
+                Inline::Text { value } => value.clone(),
+                other => format!("{other:?}"),
+            },
+            other => format!("{other:?}"),
+        };
+
+        assert!(text.contains("see"), "should contain prefix 'see': {text}");
+        assert!(
+            text.contains("Smith"),
+            "should still contain author: {text}"
+        );
+    }
+
+    #[test]
+    fn citation_with_suffix_only() {
+        let lib = test_library();
+        let transform = CiteTransform::with_library(lib, None).unwrap();
+
+        let mut doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Citation(Citation {
+                    items: vec![CiteItem {
+                        key: "smith2020".into(),
+                        prefix: None,
+                        suffix: Some("p. 42".into()),
+                    }],
+                    mode: CitationMode::Normal,
+                })],
+            }],
+            ..Default::default()
+        };
+
+        transform
+            .transform(&mut doc, &TransformContext::default())
+            .unwrap();
+
+        let text = match &doc.content[0] {
+            Block::Paragraph { content } => match &content[0] {
+                Inline::Text { value } => value.clone(),
+                other => format!("{other:?}"),
+            },
+            other => format!("{other:?}"),
+        };
+
+        assert!(
+            text.contains("p. 42"),
+            "should contain suffix 'p. 42': {text}"
+        );
+        assert!(
+            text.contains("Smith"),
+            "should still contain author: {text}"
+        );
     }
 
     #[test]
