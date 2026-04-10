@@ -319,7 +319,10 @@ impl LatexWriter {
             }
             Inline::MathInline { value } => {
                 match opts.math_engine {
-                    MathEngine::Raw | MathEngine::KaTeX | MathEngine::MathJax => {
+                    MathEngine::Raw
+                    | MathEngine::KaTeX
+                    | MathEngine::MathJax
+                    | MathEngine::MathML => {
                         // In LaTeX output, math is always raw LaTeX
                         out.push('$');
                         out.push_str(value);

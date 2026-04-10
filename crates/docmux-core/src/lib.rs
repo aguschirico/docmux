@@ -185,6 +185,8 @@ pub enum MathEngine {
     KaTeX,
     /// Output MathJax-compatible markup.
     MathJax,
+    /// Server-side conversion to MathML (no client JS needed).
+    MathML,
     /// Leave math source as-is (useful for LaTeX/Typst writers).
     Raw,
 }

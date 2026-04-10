@@ -104,7 +104,7 @@ impl HtmlWriter {
                 let class = match opts.math_engine {
                     MathEngine::KaTeX => "math math-display",
                     MathEngine::MathJax => "math math-display",
-                    MathEngine::Raw => "math",
+                    MathEngine::MathML | MathEngine::Raw => "math",
                 };
                 if let Some(label) = label {
                     out.push_str(&format!(
@@ -414,7 +414,7 @@ impl HtmlWriter {
                 let class = match opts.math_engine {
                     MathEngine::KaTeX => "math math-inline",
                     MathEngine::MathJax => "math math-inline",
-                    MathEngine::Raw => "math",
+                    MathEngine::MathML | MathEngine::Raw => "math",
                 };
                 out.push_str(&format!("<span class=\"{class}\">"));
                 out.push_str(&escape_html(value));
@@ -605,7 +605,7 @@ impl HtmlWriter {
             MathEngine::MathJax => {
                 r#"<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>"#
             }
-            MathEngine::Raw => "",
+            MathEngine::MathML | MathEngine::Raw => "",
         };
         if !math_head.is_empty() {
             ctx.insert("math".into(), TemplateValue::Str(math_head.to_string()));
