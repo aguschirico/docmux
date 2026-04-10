@@ -47,59 +47,34 @@ fn tokenize_inner(chars: &[char], pos: &mut usize, inside_brace: bool) -> Vec<To
     let mut text_buf = String::new();
 
     while *pos < chars.len() {
-        let ch = chars[*pos];
-
-        match ch {
-            // End of a brace group — return to caller.
+        match chars[*pos] {
             '}' if inside_brace => {
                 flush_text(&mut text_buf, &mut tokens);
                 *pos += 1;
                 return tokens;
             }
-
-            // Backslash — command or environment.
             '\\' => {
                 flush_text(&mut text_buf, &mut tokens);
-                *pos += 1; // skip '\'
-                let name = consume_command_name(chars, pos);
-
-                if name == "begin" {
-                    let env_name = consume_brace_raw(chars, pos);
-                    let body = consume_env_body(chars, pos, &env_name);
-                    tokens.push(Token::Environment {
-                        name: env_name,
-                        body,
-                    });
-                } else {
-                    tokens.push(Token::Command(name));
-                    // Check for optional argument immediately after command.
-                    maybe_consume_optional_arg(chars, pos, &mut tokens);
-                }
+                *pos += 1;
+                consume_backslash(chars, pos, &mut tokens);
             }
-
-            // Opening brace — recursive group.
             '{' => {
                 flush_text(&mut text_buf, &mut tokens);
-                *pos += 1; // skip '{'
-                let inner = tokenize_inner(chars, pos, true);
-                tokens.push(Token::BraceGroup(inner));
+                *pos += 1;
+                tokens.push(Token::BraceGroup(tokenize_inner(chars, pos, true)));
             }
-
             '_' => {
                 flush_text(&mut text_buf, &mut tokens);
                 tokens.push(Token::SubScript);
                 *pos += 1;
             }
-
             '^' => {
                 flush_text(&mut text_buf, &mut tokens);
                 tokens.push(Token::SuperScript);
                 *pos += 1;
             }
-
-            // Everything else is plain text.
-            _ => {
-                text_buf.push(ch);
+            other => {
+                text_buf.push(other);
                 *pos += 1;
             }
         }
@@ -107,6 +82,22 @@ fn tokenize_inner(chars: &[char], pos: &mut usize, inside_brace: bool) -> Vec<To
 
     flush_text(&mut text_buf, &mut tokens);
     tokens
+}
+
+/// Handle a backslash: either a `\begin{..}` environment or a regular command.
+fn consume_backslash(chars: &[char], pos: &mut usize, tokens: &mut Vec<Token>) {
+    let name = consume_command_name(chars, pos);
+    if name == "begin" {
+        let env_name = consume_brace_raw(chars, pos);
+        let body = consume_env_body(chars, pos, &env_name);
+        tokens.push(Token::Environment {
+            name: env_name,
+            body,
+        });
+    } else {
+        tokens.push(Token::Command(name));
+        maybe_consume_optional_arg(chars, pos, tokens);
+    }
 }
 
 /// If `text_buf` is non-empty, push it as a [`Token::Text`] and clear the
