@@ -12,6 +12,7 @@ use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
 use docmux_transform_cite::CiteTransform;
+use docmux_transform_math::{MathNotation, MathTarget, MathTransform};
 use docmux_transform_number_sections::NumberSectionsTransform;
 use docmux_transform_section_divs::SectionDivsTransform;
 use docmux_transform_toc::TocTransform;
@@ -457,6 +458,27 @@ fn main() {
         }
     }
 
+    // Apply math transform when needed
+    let source_notation = match from {
+        "typst" => MathNotation::Typst,
+        _ => MathNotation::LaTeX,
+    };
+    let target_format = match (to, &cli.math) {
+        (_, Some(ref m)) if m == "mathml" => MathTarget::MathML,
+        ("typst", _) => MathTarget::Typst,
+        _ => MathTarget::None,
+    };
+    if target_format != MathTarget::None {
+        let math_transform = MathTransform {
+            target_format,
+            source_notation,
+        };
+        if let Err(e) = math_transform.transform(&mut doc, &TransformContext::default()) {
+            eprintln!("docmux: math transform error: {e}");
+            std::process::exit(1);
+        }
+    }
+
     // Show warnings in verbose mode
     if cli.verbose && !doc.warnings.is_empty() {
         for w in &doc.warnings {
@@ -493,7 +515,8 @@ fn main() {
     let math_engine = match cli.math.as_deref() {
         Some("katex") | None => MathEngine::KaTeX,
         Some("mathjax") => MathEngine::MathJax,
-        Some("raw") | Some("mathml") => MathEngine::Raw,
+        Some("mathml") => MathEngine::MathML,
+        Some("raw") => MathEngine::Raw,
         Some(other) => {
             eprintln!("docmux: unknown math engine '{other}'");
             std::process::exit(1);

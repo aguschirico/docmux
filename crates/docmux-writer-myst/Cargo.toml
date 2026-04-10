@@ -1,0 +1,13 @@
+[package]
+name = "docmux-writer-myst"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MyST Markdown writer for docmux"
+rust-version.workspace = true
+
+[dependencies]
+docmux-ast = { workspace = true }
+docmux-core = { workspace = true }
+docmux-template = { workspace = true }

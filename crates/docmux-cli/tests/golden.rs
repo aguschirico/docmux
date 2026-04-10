@@ -19,12 +19,13 @@
 //!
 //! This overwrites all `.html` files. Review the diff with `git diff` before committing.
 
-use docmux_core::{Reader, Transform, TransformContext, WriteOptions, Writer};
+use docmux_core::{MathEngine, Reader, Transform, TransformContext, WriteOptions, Writer};
 use docmux_reader_html::HtmlReader;
 use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_typst::TypstReader;
 use docmux_transform_cite::CiteTransform;
+use docmux_transform_math::{MathNotation, MathTarget, MathTransform};
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
@@ -52,7 +53,7 @@ fn update_mode() -> bool {
 
 /// Directories that require special transform handling and are excluded from
 /// the generic discover functions. Each has its own dedicated golden test.
-const SPECIAL_FIXTURE_DIRS: &[&str] = &["citations"];
+const SPECIAL_FIXTURE_DIRS: &[&str] = &["citations", "math"];
 
 /// Recursively discover all `.md` files under `dir`, skipping special dirs.
 fn discover_fixtures(dir: &Path) -> Vec<PathBuf> {
@@ -782,6 +783,54 @@ fn citation_basic_with_bibliography() {
             actual.trim(),
             expected.trim(),
             "citation golden file mismatch: {}",
+            expected_path.display()
+        );
+    } else {
+        // Bootstrap: create the expected file
+        std::fs::create_dir_all(expected_path.parent().unwrap()).ok();
+        std::fs::write(&expected_path, &actual).expect("bootstrap expected");
+        eprintln!("bootstrapped: {}", expected_path.display());
+    }
+}
+
+// ─── MathML golden test ───────────────────────────────────────────────────
+
+#[test]
+fn mathml_basic_golden() {
+    let md_path = fixtures_dir().join("math/mathml-basic.md");
+    let expected_path = fixtures_dir().join("math/mathml-basic.html");
+
+    let input = std::fs::read_to_string(&md_path).expect("read math fixture");
+
+    // Read markdown
+    let reader = MarkdownReader::new();
+    let mut doc = reader.read(&input).expect("read markdown");
+
+    // Apply math transform (LaTeX -> MathML)
+    let math_transform = MathTransform {
+        target_format: MathTarget::MathML,
+        source_notation: MathNotation::LaTeX,
+    };
+    math_transform
+        .transform(&mut doc, &TransformContext::default())
+        .expect("math transform");
+
+    // Write HTML with MathML engine
+    let writer = HtmlWriter::new();
+    let opts = WriteOptions {
+        math_engine: MathEngine::MathML,
+        ..Default::default()
+    };
+    let actual = writer.write(&doc, &opts).expect("write html");
+
+    if update_mode() {
+        std::fs::write(&expected_path, &actual).expect("write expected");
+    } else if expected_path.exists() {
+        let expected = std::fs::read_to_string(&expected_path).expect("read expected");
+        assert_eq!(
+            actual.trim(),
+            expected.trim(),
+            "mathml golden file mismatch: {}",
             expected_path.display()
         );
     } else {

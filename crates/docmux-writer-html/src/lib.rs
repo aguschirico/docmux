@@ -100,23 +100,35 @@ impl HtmlWriter {
                     out.push_str("</code></pre>\n");
                 }
             }
-            Block::MathBlock { content, label } => {
-                let class = match opts.math_engine {
-                    MathEngine::KaTeX => "math math-display",
-                    MathEngine::MathJax => "math math-display",
-                    MathEngine::MathML | MathEngine::Raw => "math",
-                };
-                if let Some(label) = label {
-                    out.push_str(&format!(
-                        "<div class=\"{class}\" id=\"{}\">",
-                        escape_attr(label)
-                    ));
-                } else {
-                    out.push_str(&format!("<div class=\"{class}\">"));
+            Block::MathBlock { content, label } => match opts.math_engine {
+                MathEngine::MathML => {
+                    if let Some(label) = label {
+                        out.push_str(&format!("<div id=\"{}\">", escape_attr(label)));
+                    }
+                    out.push_str(content); // already MathML from transform
+                    if label.is_some() {
+                        out.push_str("</div>");
+                    }
+                    out.push('\n');
                 }
-                out.push_str(&escape_html(content));
-                out.push_str("</div>\n");
-            }
+                _ => {
+                    let class = match opts.math_engine {
+                        MathEngine::KaTeX => "math math-display",
+                        MathEngine::MathJax => "math math-display",
+                        MathEngine::MathML | MathEngine::Raw => "math",
+                    };
+                    if let Some(label) = label {
+                        out.push_str(&format!(
+                            "<div class=\"{class}\" id=\"{}\">",
+                            escape_attr(label)
+                        ));
+                    } else {
+                        out.push_str(&format!("<div class=\"{class}\">"));
+                    }
+                    out.push_str(&escape_html(content));
+                    out.push_str("</div>\n");
+                }
+            },
             Block::BlockQuote { content } => {
                 out.push_str("<blockquote>\n");
                 self.write_blocks(content, opts, doc, out);
@@ -410,16 +422,21 @@ impl HtmlWriter {
                 out.push_str(&escape_html(value));
                 out.push_str("</code>");
             }
-            Inline::MathInline { value } => {
-                let class = match opts.math_engine {
-                    MathEngine::KaTeX => "math math-inline",
-                    MathEngine::MathJax => "math math-inline",
-                    MathEngine::MathML | MathEngine::Raw => "math",
-                };
-                out.push_str(&format!("<span class=\"{class}\">"));
-                out.push_str(&escape_html(value));
-                out.push_str("</span>");
-            }
+            Inline::MathInline { value } => match opts.math_engine {
+                MathEngine::MathML => {
+                    out.push_str(value); // already MathML from transform
+                }
+                _ => {
+                    let class = match opts.math_engine {
+                        MathEngine::KaTeX => "math math-inline",
+                        MathEngine::MathJax => "math math-inline",
+                        MathEngine::MathML | MathEngine::Raw => "math",
+                    };
+                    out.push_str(&format!("<span class=\"{class}\">"));
+                    out.push_str(&escape_html(value));
+                    out.push_str("</span>");
+                }
+            },
             Inline::Link {
                 url,
                 title,
