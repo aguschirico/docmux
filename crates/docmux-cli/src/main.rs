@@ -20,6 +20,7 @@ use docmux_writer_docx::DocxWriter;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
 use docmux_writer_markdown::MarkdownWriter;
+use docmux_writer_myst::MystWriter;
 use docmux_writer_plaintext::PlaintextWriter;
 use docmux_writer_typst::TypstWriter;
 use std::collections::HashMap;
@@ -170,6 +171,7 @@ fn build_registry(id_prefix: Option<&str>) -> Registry {
     reg.add_writer(Box::new(HtmlWriter::new()));
     reg.add_writer(Box::new(LatexWriter::new()));
     reg.add_writer(Box::new(MarkdownWriter::new()));
+    reg.add_writer(Box::new(MystWriter::new()));
     reg.add_writer(Box::new(PlaintextWriter::new()));
     reg.add_writer(Box::new(TypstWriter::new()));
     reg.add_writer(Box::new(DocxWriter::new()));
