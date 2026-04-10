@@ -765,7 +765,7 @@ fn citation_basic_with_bibliography() {
     let mut doc = reader.read(&input).expect("read markdown");
 
     // Apply cite transform
-    let transform = CiteTransform::with_library(lib, None).expect("create cite transform");
+    let transform = CiteTransform::with_library(lib, None, vec![]).expect("create cite transform");
     transform
         .transform(&mut doc, &TransformContext::default())
         .expect("cite transform");

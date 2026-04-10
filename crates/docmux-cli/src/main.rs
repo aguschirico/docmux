@@ -139,6 +139,10 @@ struct Cli {
     #[arg(long, value_name = "FILE")]
     csl: Option<PathBuf>,
 
+    /// Include bibliography entries without citing in text (repeatable, use @* for all)
+    #[arg(long, value_name = "KEY")]
+    nocite: Vec<String>,
+
     /// Custom template file (implies --standalone)
     #[arg(long, value_name = "FILE")]
     template: Option<PathBuf>,
@@ -447,13 +451,24 @@ fn main() {
             None => None, // will use built-in chicago-author-date
         };
 
-        let cite_transform = match CiteTransform::with_library(combined, csl_xml.as_deref()) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("docmux: cite transform init error: {e}");
-                std::process::exit(1);
+        // Collect nocite keys from CLI and metadata
+        let mut nocite_keys = cli.nocite.clone();
+        if let Some(docmux_ast::MetaValue::List(items)) = doc.metadata.custom.get("nocite") {
+            for item in items {
+                if let docmux_ast::MetaValue::String(s) = item {
+                    nocite_keys.push(s.clone());
+                }
             }
-        };
+        }
+
+        let cite_transform =
+            match CiteTransform::with_library(combined, csl_xml.as_deref(), nocite_keys) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("docmux: cite transform init error: {e}");
+                    std::process::exit(1);
+                }
+            };
         if let Err(e) = cite_transform.transform(&mut doc, &TransformContext::default()) {
             eprintln!("docmux: cite transform error: {e}");
             std::process::exit(1);

@@ -36,13 +36,20 @@ pub struct CiteTransform {
     library: Library,
     style: IndependentStyle,
     locales: Vec<Locale>,
+    nocite_keys: Vec<String>,
 }
 
 impl CiteTransform {
     /// Create a new cite transform with the given library and optional CSL XML.
     ///
     /// If `csl_xml` is `None`, the embedded Chicago Author-Date style is used.
-    pub fn with_library(library: Library, csl_xml: Option<&str>) -> Result<Self> {
+    /// `nocite_keys` are bibliography entries to include without inline citations.
+    /// Use `"@*"` to include all entries.
+    pub fn with_library(
+        library: Library,
+        csl_xml: Option<&str>,
+        nocite_keys: Vec<String>,
+    ) -> Result<Self> {
         let xml = csl_xml.unwrap_or(DEFAULT_CSL);
         let style = IndependentStyle::from_xml(xml)
             .map_err(|e| docmux_core::ConvertError::Other(format!("CSL parse error: {e}")))?;
@@ -55,6 +62,7 @@ impl CiteTransform {
             library,
             style,
             locales,
+            nocite_keys,
         })
     }
 }
@@ -67,13 +75,18 @@ impl Transform for CiteTransform {
     fn transform(&self, doc: &mut Document, _ctx: &TransformContext) -> Result<()> {
         // Pass 1: collect citation groups in document order
         let groups = collect_citations(&doc.content);
-        if groups.is_empty() {
+        if groups.is_empty() && self.nocite_keys.is_empty() {
             return Ok(());
         }
 
         // Build the bibliography driver
-        let (cite_strings, formatted_bib) =
-            run_driver(&groups, &self.library, &self.style, &self.locales);
+        let (cite_strings, formatted_bib) = run_driver(
+            &groups,
+            &self.library,
+            &self.style,
+            &self.locales,
+            &self.nocite_keys,
+        );
 
         // Pass 2: replace Inline::Citation nodes with formatted text
         let mut cite_idx: usize = 0;
@@ -217,8 +230,9 @@ fn run_driver(
     library: &Library,
     style: &IndependentStyle,
     locales: &[Locale],
+    nocite_keys: &[String],
 ) -> (Vec<String>, Option<Vec<Block>>) {
-    let (result, sent_to_driver) = feed_driver(groups, library, style, locales);
+    let (result, sent_to_driver) = feed_driver(groups, library, style, locales, nocite_keys);
     let cite_strings = extract_cite_strings(&result, &sent_to_driver, groups);
     let bib_blocks = build_bib_blocks(&result);
     (cite_strings, bib_blocks)
@@ -230,6 +244,7 @@ fn feed_driver(
     library: &Library,
     style: &IndependentStyle,
     locales: &[Locale],
+    nocite_keys: &[String],
 ) -> (Rendered, Vec<bool>) {
     let mut driver = BibliographyDriver::new();
     let mut sent_to_driver: Vec<bool> = Vec::with_capacity(groups.len());
@@ -245,6 +260,9 @@ fn feed_driver(
         }
     }
 
+    // Add nocite entries (bibliography only, no inline text)
+    feed_nocite_entries(&mut driver, nocite_keys, library, style, locales);
+
     let result = driver.finish(BibliographyRequest {
         style,
         locale: None,
@@ -252,6 +270,35 @@ fn feed_driver(
     });
 
     (result, sent_to_driver)
+}
+
+/// Feed nocite keys into the driver so they appear in the bibliography.
+///
+/// If `nocite_keys` contains `"@*"`, all library entries are included.
+/// Otherwise, each key (with optional leading `@`) is looked up individually.
+fn feed_nocite_entries<'a>(
+    driver: &mut BibliographyDriver<'a, Entry>,
+    nocite_keys: &[String],
+    library: &'a Library,
+    style: &'a IndependentStyle,
+    locales: &'a [Locale],
+) {
+    let all_keys: Vec<String> = if nocite_keys.iter().any(|k| k == "@*") {
+        library.iter().map(|e| e.key().to_string()).collect()
+    } else {
+        nocite_keys
+            .iter()
+            .map(|k| k.trim_start_matches('@').to_string())
+            .collect()
+    };
+
+    for key in &all_keys {
+        if let Some(entry) = library.get(key) {
+            let ci = CitationItem::with_entry(entry);
+            let req = CitationRequest::from_items(vec![ci], style, locales);
+            driver.citation(req);
+        }
+    }
 }
 
 /// Extract citation strings from the driver result, aligning with groups.
@@ -556,7 +603,7 @@ smith2020:
     #[test]
     fn resolves_known_citation() {
         let lib = test_library();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![Block::Paragraph {
@@ -599,7 +646,7 @@ smith2020:
     #[test]
     fn unknown_key_becomes_placeholder() {
         let lib = test_library();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![Block::Paragraph {
@@ -627,7 +674,7 @@ smith2020:
     #[test]
     fn bibliography_appended_at_end() {
         let lib = test_library();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![Block::Paragraph {
@@ -654,7 +701,7 @@ smith2020:
     #[test]
     fn bibliography_replaces_refs_div() {
         let lib = test_library();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![
@@ -714,7 +761,7 @@ smith2020:
         title: Journal
 "#;
         let lib = hayagriva::io::from_yaml_str(bib_yaml).unwrap();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![Block::Paragraph {
@@ -752,7 +799,7 @@ smith2020:
     #[test]
     fn citation_with_prefix_only() {
         let lib = test_library();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![Block::Paragraph {
@@ -790,7 +837,7 @@ smith2020:
     #[test]
     fn citation_with_suffix_only() {
         let lib = test_library();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![Block::Paragraph {
@@ -831,7 +878,7 @@ smith2020:
     #[test]
     fn no_bibliography_when_no_citations() {
         let lib = test_library();
-        let transform = CiteTransform::with_library(lib, None).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec![]).unwrap();
 
         let mut doc = Document {
             content: vec![Block::Paragraph {
@@ -850,6 +897,93 @@ smith2020:
             doc.content.len(),
             original_len,
             "No blocks should be added when there are no citations"
+        );
+    }
+
+    #[test]
+    fn nocite_adds_to_bibliography() {
+        let bib_yaml = r#"
+smith2020:
+    type: article
+    title: Test Article
+    author: Smith, John
+    date: 2020
+    parent:
+        type: periodical
+        title: Journal
+jones2021:
+    type: article
+    title: Another Article
+    author: Jones, Jane
+    date: 2021
+    parent:
+        type: periodical
+        title: Proceedings
+"#;
+        let lib = hayagriva::io::from_yaml_str(bib_yaml).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec!["jones2021".into()]).unwrap();
+
+        let mut doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::text("No citations here.")],
+            }],
+            ..Default::default()
+        };
+
+        transform
+            .transform(&mut doc, &TransformContext::default())
+            .unwrap();
+
+        // Should have bibliography at end with jones2021
+        let text = format!("{:?}", doc.content);
+        assert!(
+            text.contains("Jones") || text.contains("Another"),
+            "bibliography should contain nocite entry: {text}"
+        );
+    }
+
+    #[test]
+    fn nocite_star_includes_all() {
+        let bib_yaml = r#"
+smith2020:
+    type: article
+    title: First
+    author: Smith, John
+    date: 2020
+    parent:
+        type: periodical
+        title: Journal
+jones2021:
+    type: article
+    title: Second
+    author: Jones, Jane
+    date: 2021
+    parent:
+        type: periodical
+        title: Proceedings
+"#;
+        let lib = hayagriva::io::from_yaml_str(bib_yaml).unwrap();
+        let transform = CiteTransform::with_library(lib, None, vec!["@*".into()]).unwrap();
+
+        let mut doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::text("No citations.")],
+            }],
+            ..Default::default()
+        };
+
+        transform
+            .transform(&mut doc, &TransformContext::default())
+            .unwrap();
+
+        let text = format!("{:?}", doc.content);
+        assert!(
+            text.contains("Smith") || text.contains("First"),
+            "should have Smith: {text}"
+        );
+        assert!(
+            text.contains("Jones") || text.contains("Second"),
+            "should have Jones: {text}"
         );
     }
 }
