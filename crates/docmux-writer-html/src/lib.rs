@@ -5,6 +5,7 @@
 use base64::Engine;
 use docmux_ast::*;
 use docmux_core::{MathEngine, Result, WriteOptions, Writer};
+use docmux_highlight::LineOptions;
 
 /// An HTML5 writer.
 #[derive(Debug, Default)]
@@ -47,8 +48,12 @@ impl HtmlWriter {
                 out.push_str(&format!("</{tag}>\n"));
             }
             Block::CodeBlock {
-                language, content, ..
+                language,
+                content,
+                attrs,
+                ..
             } => {
+                let line_opts = LineOptions::from_attrs(attrs.as_ref());
                 if let (Some(lang), Some(theme)) =
                     (language.as_deref(), opts.highlight_style.as_deref())
                 {
@@ -57,26 +62,7 @@ impl HtmlWriter {
                             "<pre><code class=\"language-{}\">",
                             escape_html(lang)
                         ));
-                        for line in &lines {
-                            for token in line {
-                                let c = token.style.foreground;
-                                let mut style = format!("color:#{:02x}{:02x}{:02x}", c.r, c.g, c.b);
-                                if token.style.bold {
-                                    style.push_str(";font-weight:bold");
-                                }
-                                if token.style.italic {
-                                    style.push_str(";font-style:italic");
-                                }
-                                if token.style.underline {
-                                    style.push_str(";text-decoration:underline");
-                                }
-                                out.push_str(&format!(
-                                    "<span style=\"{}\">{}</span>",
-                                    style,
-                                    escape_html(&token.text)
-                                ));
-                            }
-                        }
+                        write_highlighted_lines(out, &lines, &line_opts);
                         out.push_str("</code></pre>\n");
                     } else {
                         // Highlight failed (unknown lang, etc.) — fall back to plain
@@ -84,7 +70,7 @@ impl HtmlWriter {
                             "<pre><code class=\"language-{}\">",
                             escape_html(lang)
                         ));
-                        out.push_str(&escape_html(content));
+                        write_plain_lines(out, content, &line_opts);
                         out.push_str("</code></pre>\n");
                     }
                 } else if let Some(lang) = language {
@@ -92,11 +78,11 @@ impl HtmlWriter {
                         "<pre><code class=\"language-{}\">",
                         escape_html(lang)
                     ));
-                    out.push_str(&escape_html(content));
+                    write_plain_lines(out, content, &line_opts);
                     out.push_str("</code></pre>\n");
                 } else {
                     out.push_str("<pre><code>");
-                    out.push_str(&escape_html(content));
+                    write_plain_lines(out, content, &line_opts);
                     out.push_str("</code></pre>\n");
                 }
             }
@@ -628,6 +614,12 @@ impl HtmlWriter {
             ctx.insert("math".into(), TemplateValue::Str(math_head.to_string()));
         }
 
+        // Code block line-feature CSS (harmless if unused)
+        ctx.insert(
+            "highlighting-css".into(),
+            TemplateValue::Str(CODE_LINE_CSS.to_string()),
+        );
+
         // CSS URLs from variables
         let mut css_urls: Vec<TemplateValue> = Vec::new();
         // "css" is the first URL, "css1", "css2" etc are subsequent
@@ -711,11 +703,89 @@ fn alignment_css(a: &Alignment) -> &'static str {
     }
 }
 
+/// CSS for line numbers and line highlighting in code blocks.
+const CODE_LINE_CSS: &str = "\
+.line-number { color: #6e7781; padding-right: 1em; user-select: none; display: inline-block; text-align: right; min-width: 2em; }\n\
+.highlight-line { background-color: rgba(255, 255, 0, 0.15); display: block; }";
+
+/// Write a line-number `<span>` if `line_opts.number_lines` is true.
+fn write_code_line_prefix(out: &mut String, line_num: u32, line_opts: &LineOptions) {
+    if line_opts.number_lines {
+        out.push_str(&format!("<span class=\"line-number\">{line_num}</span>"));
+    }
+}
+
+/// Write syntax-highlighted tokens for a single line.
+fn write_highlighted_tokens(out: &mut String, tokens: &[docmux_highlight::HighlightToken]) {
+    for token in tokens {
+        let c = token.style.foreground;
+        let mut style = format!("color:#{:02x}{:02x}{:02x}", c.r, c.g, c.b);
+        if token.style.bold {
+            style.push_str(";font-weight:bold");
+        }
+        if token.style.italic {
+            style.push_str(";font-style:italic");
+        }
+        if token.style.underline {
+            style.push_str(";text-decoration:underline");
+        }
+        out.push_str(&format!(
+            "<span style=\"{}\">{}</span>",
+            style,
+            escape_html(&token.text)
+        ));
+    }
+}
+
+/// Render syntax-highlighted lines with optional line numbers and highlighting.
+fn write_highlighted_lines(
+    out: &mut String,
+    lines: &[Vec<docmux_highlight::HighlightToken>],
+    line_opts: &LineOptions,
+) {
+    for (i, line) in lines.iter().enumerate() {
+        let line_num = line_opts.start_from + i as u32;
+        write_code_line_prefix(out, line_num, line_opts);
+        if line_opts.is_highlighted(line_num) {
+            out.push_str("<span class=\"highlight-line\">");
+            write_highlighted_tokens(out, line);
+            out.push_str("</span>");
+        } else {
+            write_highlighted_tokens(out, line);
+        }
+    }
+}
+
+/// Render plain-text code lines with optional line numbers and highlighting.
+fn write_plain_lines(out: &mut String, content: &str, line_opts: &LineOptions) {
+    let has_line_features = line_opts.number_lines || !line_opts.highlighted_lines.is_empty();
+    if !has_line_features {
+        out.push_str(&escape_html(content));
+        return;
+    }
+    for (i, line) in content.split('\n').enumerate() {
+        let line_num = line_opts.start_from + i as u32;
+        write_code_line_prefix(out, line_num, line_opts);
+        if line_opts.is_highlighted(line_num) {
+            out.push_str("<span class=\"highlight-line\">");
+            out.push_str(&escape_html(line));
+            out.push_str("</span>");
+        } else {
+            out.push_str(&escape_html(line));
+        }
+        // Preserve newlines between lines (split removes them)
+        if i < content.split('\n').count() - 1 {
+            out.push('\n');
+        }
+    }
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn write_html(doc: &Document) -> String {
         let writer = HtmlWriter::new();
@@ -926,5 +996,79 @@ mod tests {
             output.contains("src=\"images/photo.jpg\""),
             "should use path as-is, got: {output}"
         );
+    }
+
+    #[test]
+    fn code_block_with_line_numbers() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("python".into()),
+                content: "def hello():\n    print(\"world\")".into(),
+                caption: None,
+                label: None,
+                attrs: Some(Attributes {
+                    id: None,
+                    classes: vec!["numberLines".into()],
+                    key_values: HashMap::new(),
+                }),
+            }],
+            ..Default::default()
+        };
+        let writer = HtmlWriter::new();
+        let opts = WriteOptions::default();
+        let html = writer.write(&doc, &opts).unwrap();
+        assert!(html.contains("line-number"), "should have line numbers");
+    }
+
+    #[test]
+    fn code_block_with_line_highlight() {
+        let mut kvs = HashMap::new();
+        kvs.insert("highlight".into(), "2".into());
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("python".into()),
+                content: "line1\nline2\nline3".into(),
+                caption: None,
+                label: None,
+                attrs: Some(Attributes {
+                    id: None,
+                    classes: vec![],
+                    key_values: kvs,
+                }),
+            }],
+            ..Default::default()
+        };
+        let writer = HtmlWriter::new();
+        let opts = WriteOptions::default();
+        let html = writer.write(&doc, &opts).unwrap();
+        assert!(
+            html.contains("highlight-line"),
+            "should have highlight class"
+        );
+    }
+
+    #[test]
+    fn code_block_with_start_from() {
+        let mut kvs = HashMap::new();
+        kvs.insert("startFrom".into(), "10".into());
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: Some("python".into()),
+                content: "a\nb".into(),
+                caption: None,
+                label: None,
+                attrs: Some(Attributes {
+                    id: None,
+                    classes: vec!["numberLines".into()],
+                    key_values: kvs,
+                }),
+            }],
+            ..Default::default()
+        };
+        let writer = HtmlWriter::new();
+        let opts = WriteOptions::default();
+        let html = writer.write(&doc, &opts).unwrap();
+        assert!(html.contains(">10<"), "should start at 10");
+        assert!(html.contains(">11<"), "should have line 11");
     }
 }

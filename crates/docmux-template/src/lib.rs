@@ -100,6 +100,9 @@ pub const DEFAULT_LATEX: &str = include_str!("../templates/default.latex");
 /// Built-in default Markdown template.
 pub const DEFAULT_MARKDOWN: &str = include_str!("../templates/default.markdown");
 
+/// Built-in default MyST template.
+pub const DEFAULT_MYST: &str = include_str!("../templates/default.myst");
+
 /// Built-in default plaintext template.
 pub const DEFAULT_PLAINTEXT: &str = include_str!("../templates/default.plaintext");
 
@@ -109,6 +112,7 @@ pub fn default_template_for(format: &str) -> Option<&'static str> {
         "html" => Some(DEFAULT_HTML),
         "latex" => Some(DEFAULT_LATEX),
         "markdown" => Some(DEFAULT_MARKDOWN),
+        "myst" => Some(DEFAULT_MYST),
         "plain" | "plaintext" => Some(DEFAULT_PLAINTEXT),
         _ => None,
     }
@@ -139,6 +143,7 @@ mod tests {
             ("html", DEFAULT_HTML),
             ("latex", DEFAULT_LATEX),
             ("markdown", DEFAULT_MARKDOWN),
+            ("myst", DEFAULT_MYST),
             ("plaintext", DEFAULT_PLAINTEXT),
         ] {
             parse(src).unwrap_or_else(|e| panic!("default {name} template failed to parse: {e}"));

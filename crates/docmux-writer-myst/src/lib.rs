@@ -550,6 +550,87 @@ impl MystWriter {
     }
 }
 
+impl MystWriter {
+    fn wrap_standalone(&self, body: &str, doc: &Document) -> Result<String> {
+        let template_src = docmux_template::DEFAULT_MYST.to_string();
+        let ctx = self.build_template_context(body, doc);
+        docmux_template::render(&template_src, &ctx).map_err(docmux_core::ConvertError::from)
+    }
+
+    fn build_template_context(
+        &self,
+        body: &str,
+        doc: &Document,
+    ) -> docmux_template::TemplateContext {
+        use docmux_template::TemplateValue;
+        let meta = &doc.metadata;
+        let mut ctx = docmux_template::TemplateContext::new();
+
+        ctx.insert("body".into(), TemplateValue::Str(body.to_string()));
+
+        let has_meta = meta.title.is_some()
+            || !meta.authors.is_empty()
+            || meta.date.is_some()
+            || meta.abstract_text.is_some()
+            || !meta.keywords.is_empty()
+            || !meta.custom.is_empty();
+
+        if has_meta {
+            ctx.insert("has-meta".into(), TemplateValue::Bool(true));
+        }
+
+        self.insert_title_and_date(meta, &mut ctx);
+        self.insert_authors(meta, &mut ctx);
+        self.insert_abstract_and_keywords(meta, &mut ctx);
+
+        ctx
+    }
+
+    fn insert_title_and_date(&self, meta: &Metadata, ctx: &mut docmux_template::TemplateContext) {
+        use docmux_template::TemplateValue;
+        if let Some(title) = &meta.title {
+            ctx.insert("title".into(), TemplateValue::Str(yaml_escape(title)));
+        }
+        if let Some(date) = &meta.date {
+            ctx.insert("date".into(), TemplateValue::Str(yaml_escape(date)));
+        }
+    }
+
+    fn insert_authors(&self, meta: &Metadata, ctx: &mut docmux_template::TemplateContext) {
+        use docmux_template::TemplateValue;
+        if meta.authors.len() == 1 {
+            ctx.insert(
+                "author-single".into(),
+                TemplateValue::Str(yaml_escape(&meta.authors[0].name)),
+            );
+        } else if meta.authors.len() > 1 {
+            let list: Vec<TemplateValue> =
+                meta.authors.iter().map(author_to_template_value).collect();
+            ctx.insert("author-list".into(), TemplateValue::List(list));
+        }
+    }
+
+    fn insert_abstract_and_keywords(
+        &self,
+        meta: &Metadata,
+        ctx: &mut docmux_template::TemplateContext,
+    ) {
+        use docmux_template::TemplateValue;
+        if let Some(abstract_blocks) = &meta.abstract_text {
+            let text = blocks_to_plain_text(abstract_blocks);
+            ctx.insert("abstract".into(), TemplateValue::Str(yaml_escape(&text)));
+        }
+        if !meta.keywords.is_empty() {
+            let kw_list: Vec<TemplateValue> = meta
+                .keywords
+                .iter()
+                .map(|k| TemplateValue::Str(yaml_escape(k)))
+                .collect();
+            ctx.insert("keyword".into(), TemplateValue::List(kw_list));
+        }
+    }
+}
+
 impl Writer for MystWriter {
     fn format(&self) -> &str {
         "myst"
@@ -559,10 +640,15 @@ impl Writer for MystWriter {
         "md"
     }
 
-    fn write(&self, doc: &Document, _opts: &WriteOptions) -> Result<String> {
+    fn write(&self, doc: &Document, opts: &WriteOptions) -> Result<String> {
         let mut body = String::with_capacity(4096);
         self.write_blocks(&doc.content, &mut body);
-        Ok(body)
+
+        if opts.standalone {
+            self.wrap_standalone(&body, doc)
+        } else {
+            Ok(body)
+        }
     }
 }
 
@@ -589,6 +675,59 @@ fn code_delimiters(code: &str) -> (String, String) {
     } else {
         (ticks.clone(), ticks)
     }
+}
+
+fn yaml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn blocks_to_plain_text(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    for block in blocks {
+        if let Block::Paragraph { content } = block {
+            inlines_to_plain_text(content, &mut out);
+        }
+    }
+    out
+}
+
+fn inlines_to_plain_text(inlines: &[Inline], out: &mut String) {
+    for inline in inlines {
+        match inline {
+            Inline::Text { value } => out.push_str(value),
+            Inline::Code { value, .. } | Inline::MathInline { value } => out.push_str(value),
+            Inline::SoftBreak | Inline::HardBreak => out.push(' '),
+            Inline::Emphasis { content }
+            | Inline::Strong { content }
+            | Inline::Strikethrough { content }
+            | Inline::Underline { content }
+            | Inline::Superscript { content }
+            | Inline::Subscript { content }
+            | Inline::SmallCaps { content }
+            | Inline::Span { content, .. }
+            | Inline::Quoted { content, .. } => inlines_to_plain_text(content, out),
+            Inline::Link { content, .. } => inlines_to_plain_text(content, out),
+            _ => {}
+        }
+    }
+}
+
+fn author_to_template_value(a: &Author) -> docmux_template::TemplateValue {
+    use docmux_template::TemplateValue;
+    let mut map = std::collections::HashMap::new();
+    map.insert("name".into(), TemplateValue::Str(yaml_escape(&a.name)));
+    let has_details = a.affiliation.is_some() || a.email.is_some() || a.orcid.is_some();
+    map.insert("has-details".into(), TemplateValue::Bool(has_details));
+    if let Some(aff) = &a.affiliation {
+        map.insert("affiliation".into(), TemplateValue::Str(yaml_escape(aff)));
+    }
+    if let Some(email) = &a.email {
+        map.insert("email".into(), TemplateValue::Str(yaml_escape(email)));
+    }
+    if let Some(orcid) = &a.orcid {
+        map.insert("orcid".into(), TemplateValue::Str(yaml_escape(orcid)));
+    }
+    TemplateValue::Map(map)
 }
 
 #[cfg(test)]
@@ -1008,8 +1147,9 @@ mod tests {
             ..Default::default()
         };
         let myst = write_myst(&doc);
-        assert!(myst.contains(":::"));
+        assert!(myst.contains("::: {#note1 .special}"));
         assert!(myst.contains("Div content."));
+        assert!(myst.contains(":::\n"));
     }
 
     #[test]
@@ -1338,5 +1478,97 @@ mod tests {
         };
         let myst = write_myst(&doc);
         assert!(myst.contains("{u}`underlined`"));
+    }
+
+    #[test]
+    fn citation_suppress_author() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Citation(Citation {
+                    items: vec![CiteItem {
+                        key: "smith2020".into(),
+                        prefix: None,
+                        suffix: None,
+                    }],
+                    mode: CitationMode::SuppressAuthor,
+                })],
+            }],
+            ..Default::default()
+        };
+        let myst = write_myst(&doc);
+        assert_eq!(myst.trim(), "{cite:p}`smith2020`");
+    }
+
+    #[test]
+    fn crossref_number_with_type() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::CrossRef(CrossRef {
+                    target: "tab-results".into(),
+                    form: RefForm::NumberWithType,
+                })],
+            }],
+            ..Default::default()
+        };
+        let myst = write_myst(&doc);
+        assert_eq!(myst.trim(), "{numref}`tab-results`");
+    }
+
+    #[test]
+    fn crossref_page() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::CrossRef(CrossRef {
+                    target: "ch-intro".into(),
+                    form: RefForm::Page,
+                })],
+            }],
+            ..Default::default()
+        };
+        let myst = write_myst(&doc);
+        assert_eq!(myst.trim(), "{ref}`ch-intro`");
+    }
+
+    #[test]
+    fn raw_block_non_html() {
+        let doc = Document {
+            content: vec![Block::RawBlock {
+                format: "latex".into(),
+                content: "\\newpage".into(),
+            }],
+            ..Default::default()
+        };
+        let myst = write_myst(&doc);
+        assert!(myst.contains("```latex\n\\newpage\n```"));
+    }
+
+    #[test]
+    fn standalone_with_frontmatter() {
+        let doc = Document {
+            metadata: Metadata {
+                title: Some("My Doc".into()),
+                authors: vec![Author {
+                    name: "Jane Doe".into(),
+                    affiliation: None,
+                    email: None,
+                    orcid: None,
+                }],
+                date: Some("2026-04-10".into()),
+                ..Default::default()
+            },
+            content: vec![Block::text("Body.")],
+            ..Default::default()
+        };
+        let writer = MystWriter::new();
+        let opts = WriteOptions {
+            standalone: true,
+            ..Default::default()
+        };
+        let myst = writer.write(&doc, &opts).unwrap();
+        assert!(myst.starts_with("---\n"));
+        assert!(myst.contains("title: \"My Doc\""));
+        assert!(myst.contains("author: \"Jane Doe\""));
+        assert!(myst.contains("date: \"2026-04-10\""));
+        assert!(myst.contains("---\n\nBody."));
     }
 }
