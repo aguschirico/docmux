@@ -90,12 +90,12 @@
 
 - [x] `docmux-transform-cite` — CSL citation processing
   - [x] Fix: embed `locales-en-US.xml` so dates render in citations
-  - [ ] Forward `CiteItem.prefix`/`suffix` to hayagriva (enables `(see Smith 2020, p. 42)`)
-  - [ ] `--nocite` flag
+  - [x] Forward `CiteItem.prefix`/`suffix` to hayagriva (enables `(see Smith 2020, p. 42)`)
+  - [x] `--nocite` flag
 - [x] `docmux-transform-toc` — table of contents generation (6 tests)
 - [x] `docmux-transform-number-sections` — heading numbering (7 tests)
 - [x] `docmux-transform-section-divs` — wrap sections in Div containers (7 tests)
-- [ ] `docmux-transform-math` — normalize math notation across formats
+- [x] `docmux-transform-math` — LaTeX ↔ Typst conversion + MathML output
 
 ### Writers & readers
 
@@ -112,7 +112,7 @@
 ### Syntax highlighting
 
 - [x] `docmux-highlight` — server-side highlighting via `syntect` (8 tests), integrated in HTML and LaTeX writers
-- [ ] Line numbers, multiple styles
+- [x] Line numbers (`.numberLines`, `startFrom`), line highlighting (`highlight="2,4-6"`)
 
 ### Packaging
 
@@ -152,6 +152,15 @@
 - [ ] WASM filter support
 - [ ] `--log=FILE`, `--trace`
 - [ ] Watch mode (`docmux watch input.md -o output.html`)
+
+### Math
+
+- [ ] OMML math output in DOCX writer (LaTeX → Office Math Markup Language)
+
+### Syntax highlighting
+
+- [ ] Load custom `.tmTheme` theme files
+- [ ] Per-code-block theme selection
 
 ### Other
 
