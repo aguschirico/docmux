@@ -8,5 +8,6 @@ description = "Syntax highlighting for docmux using syntect"
 rust-version.workspace = true
 
 [dependencies]
+docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
 syntect = { workspace = true }

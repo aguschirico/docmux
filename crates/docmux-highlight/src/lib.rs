@@ -7,6 +7,7 @@
 //! per line) that writers can consume to emit HTML `<span>` elements,
 //! LaTeX `\textcolor` commands, or any other coloured output.
 
+use std::ops::RangeInclusive;
 use std::sync::LazyLock;
 
 use syntect::easy::HighlightLines;
@@ -44,6 +45,70 @@ pub struct TokenStyle {
 pub struct HighlightToken {
     pub text: String,
     pub style: TokenStyle,
+}
+
+/// Options for line-level features in code blocks.
+#[derive(Debug, Clone, Default)]
+pub struct LineOptions {
+    /// Whether to show line numbers.
+    pub number_lines: bool,
+    /// Starting line number (default 1).
+    pub start_from: u32,
+    /// Lines to visually highlight.
+    pub highlighted_lines: Vec<RangeInclusive<u32>>,
+}
+
+impl LineOptions {
+    /// Check if a given 1-based line number should be highlighted.
+    pub fn is_highlighted(&self, line: u32) -> bool {
+        self.highlighted_lines.iter().any(|r| r.contains(&line))
+    }
+
+    /// Parse `LineOptions` from code block attributes.
+    ///
+    /// Looks for `.numberLines` class, `startFrom` key, and `highlight` key.
+    pub fn from_attrs(attrs: Option<&docmux_ast::Attributes>) -> Self {
+        let Some(attrs) = attrs else {
+            return Self::default();
+        };
+        let number_lines = attrs.classes.iter().any(|c| c == "numberLines");
+        let start_from = attrs
+            .key_values
+            .get("startFrom")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(1);
+        let highlighted_lines = attrs
+            .key_values
+            .get("highlight")
+            .map(|v| parse_line_ranges(v))
+            .unwrap_or_default();
+        Self {
+            number_lines,
+            start_from,
+            highlighted_lines,
+        }
+    }
+}
+
+/// Parse a highlight range string like `"2,4-6,10"` into inclusive ranges.
+pub fn parse_line_ranges(input: &str) -> Vec<RangeInclusive<u32>> {
+    input
+        .split(',')
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            if let Some((start, end)) = part.split_once('-') {
+                let s = start.trim().parse::<u32>().ok()?;
+                let e = end.trim().parse::<u32>().ok()?;
+                Some(s..=e)
+            } else {
+                let n = part.parse::<u32>().ok()?;
+                Some(n..=n)
+            }
+        })
+        .collect()
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -226,5 +291,57 @@ mod tests {
         let tokens = highlight("", "rs", "base16-ocean.dark").unwrap();
         // Empty input should yield zero lines
         assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn parse_single_line() {
+        let ranges = parse_line_ranges("3");
+        assert_eq!(ranges, vec![3..=3]);
+    }
+
+    #[test]
+    fn parse_range() {
+        let ranges = parse_line_ranges("2-5");
+        assert_eq!(ranges, vec![2..=5]);
+    }
+
+    #[test]
+    fn parse_mixed() {
+        let ranges = parse_line_ranges("1,3-5,8");
+        assert_eq!(ranges, vec![1..=1, 3..=5, 8..=8]);
+    }
+
+    #[test]
+    fn parse_empty() {
+        let ranges = parse_line_ranges("");
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn parse_whitespace() {
+        let ranges = parse_line_ranges(" 2 , 4 - 6 ");
+        assert_eq!(ranges, vec![2..=2, 4..=6]);
+    }
+
+    #[test]
+    fn parse_invalid_skipped() {
+        let ranges = parse_line_ranges("2,abc,5");
+        assert_eq!(ranges, vec![2..=2, 5..=5]);
+    }
+
+    #[test]
+    fn is_line_highlighted() {
+        let opts = LineOptions {
+            number_lines: false,
+            start_from: 1,
+            highlighted_lines: vec![2..=2, 4..=6],
+        };
+        assert!(!opts.is_highlighted(1));
+        assert!(opts.is_highlighted(2));
+        assert!(!opts.is_highlighted(3));
+        assert!(opts.is_highlighted(4));
+        assert!(opts.is_highlighted(5));
+        assert!(opts.is_highlighted(6));
+        assert!(!opts.is_highlighted(7));
     }
 }
