@@ -39,6 +39,50 @@ fn xml_escape(input: &str) -> String {
     out
 }
 
+// ─── Image helpers ──────────────────────────────────────────────────────────
+
+/// Parse image dimensions (width, height) in pixels from PNG or JPEG headers.
+#[allow(dead_code)]
+fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    // PNG: magic bytes + IHDR chunk at offset 16 (width) and 20 (height)
+    if data.len() >= 24 && data[0..4] == [0x89, 0x50, 0x4E, 0x47] {
+        let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
+        let h = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+        return Some((w, h));
+    }
+    // JPEG: scan for SOF0 (FF C0) or SOF2 (FF C2) marker
+    if data.len() >= 4 && data[0..2] == [0xFF, 0xD8] {
+        let mut i = 2;
+        while i + 8 < data.len() {
+            if data[i] == 0xFF && (data[i + 1] == 0xC0 || data[i + 1] == 0xC2) {
+                // SOF layout: FF Cx | length(2) | precision(1) | height(2) | width(2)
+                let h = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
+                let w = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
+                return Some((w, h));
+            }
+            if data[i] == 0xFF && i + 3 < data.len() {
+                let seg_len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
+                i += 2 + seg_len;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+/// Detect MIME type from magic bytes.
+#[allow(dead_code)]
+fn detect_mime(data: &[u8]) -> Option<&'static str> {
+    if data.len() >= 4 && data[0..4] == [0x89, 0x50, 0x4E, 0x47] {
+        Some("image/png")
+    } else if data.len() >= 3 && data[0..3] == [0xFF, 0xD8, 0xFF] {
+        Some("image/jpeg")
+    } else {
+        None
+    }
+}
+
 // ─── Relationship ───────────────────────────────────────────────────────────
 
 /// An OOXML relationship entry.
@@ -1813,5 +1857,58 @@ mod tests {
         assert_eq!(xml_escape("<tag>"), "&lt;tag&gt;");
         assert_eq!(xml_escape("\"quoted\""), "&quot;quoted&quot;");
         assert_eq!(xml_escape("plain"), "plain");
+    }
+
+    #[test]
+    fn png_dimensions_parsed() {
+        let png: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE,
+        ];
+        assert_eq!(image_dimensions(png), Some((1, 1)));
+    }
+
+    #[test]
+    fn png_dimensions_large_image() {
+        let mut png = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52,
+        ];
+        png.extend_from_slice(&800_u32.to_be_bytes());
+        png.extend_from_slice(&600_u32.to_be_bytes());
+        assert_eq!(image_dimensions(&png), Some((800, 600)));
+    }
+
+    #[test]
+    fn jpeg_dimensions_parsed() {
+        let jpeg: &[u8] = &[
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x02, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x01,
+            0xE0, // height = 480
+            0x02, 0x80, // width = 640
+        ];
+        assert_eq!(image_dimensions(jpeg), Some((640, 480)));
+    }
+
+    #[test]
+    fn unknown_format_returns_none() {
+        assert_eq!(image_dimensions(&[0x00, 0x01, 0x02]), None);
+    }
+
+    #[test]
+    fn mime_from_magic_bytes_png() {
+        let png = [0x89, 0x50, 0x4E, 0x47];
+        assert_eq!(detect_mime(&png), Some("image/png"));
+    }
+
+    #[test]
+    fn mime_from_magic_bytes_jpeg() {
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0];
+        assert_eq!(detect_mime(&jpeg), Some("image/jpeg"));
+    }
+
+    #[test]
+    fn mime_from_unknown_bytes() {
+        assert_eq!(detect_mime(&[0x00, 0x01]), None);
     }
 }
