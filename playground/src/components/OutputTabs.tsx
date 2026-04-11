@@ -12,7 +12,8 @@ import {
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useConversion } from "@/hooks/useConversion";
 import { db } from "@/vfs/db";
-import { getFormat, getExtension, isBinaryFormat } from "@/lib/formats";
+import { getFormat, isBinaryFormat } from "@/lib/formats";
+import { useDownload } from "@/hooks/useDownload";
 import { HtmlPreview } from "@/components/output-tabs/HtmlPreview";
 import { ReadOnlyEditor } from "@/components/output-tabs/ReadOnlyEditor";
 import { DiagnosticsView } from "@/components/output-tabs/DiagnosticsView";
@@ -35,22 +36,31 @@ const FORMAT_TO_MONACO: Record<string, string> = {
   docx: "plaintext",
 };
 
-const FORMAT_TO_EXT: Record<string, string> = {
-  html: "html",
-  latex: "tex",
-  typst: "typ",
-  markdown: "md",
-  plain: "txt",
-  docx: "docx",
-};
-
 export function OutputTabs() {
-  const { activeFileId } = useWorkspace();
+  const { activeFileId, activeWorkspaceId } = useWorkspace();
   const [outputFormat, setOutputFormat] = useState("html");
 
   const file = useLiveQuery(
     () => (activeFileId ? db.files.get(activeFileId) : undefined),
     [activeFileId],
+  );
+
+  const imageResources = useLiveQuery(
+    async () => {
+      if (!activeWorkspaceId) return null;
+      const files = await db.files
+        .where("workspaceId")
+        .equals(activeWorkspaceId)
+        .toArray();
+      const map = new Map<string, Uint8Array>();
+      for (const f of files) {
+        if (f.binaryContent && /\.(png|jpe?g|gif|webp)$/i.test(f.path)) {
+          map.set(f.path, new Uint8Array(f.binaryContent));
+        }
+      }
+      return map.size > 0 ? map : null;
+    },
+    [activeWorkspaceId],
   );
 
   const inputFormat = file?.path ? getFormat(file.path) : null;
@@ -60,27 +70,20 @@ export function OutputTabs() {
     ? new Uint8Array(file.binaryContent)
     : null;
 
-  const { preview, source, ast, errors, converting } = useConversion(
+  const { preview, source, binaryOutput, ast, errors, converting } = useConversion(
     content,
     inputFormat,
     outputFormat,
     binaryContent,
+    imageResources,
   );
 
-  function handleDownload() {
-    if (!source) return;
-    const ext = FORMAT_TO_EXT[outputFormat] ?? "txt";
-    const baseName = file?.path
-      ? file.path.replace(`.${getExtension(file.path)}`, "")
-      : "output";
-    const blob = new Blob([source], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${baseName}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const { handleDownload, canDownload } = useDownload(
+    outputFormat,
+    file?.path,
+    source,
+    binaryOutput,
+  );
 
   return (
     <Tabs defaultValue="preview" className="flex h-full flex-col">
@@ -122,7 +125,7 @@ export function OutputTabs() {
 
         <div className="ml-auto" />
         <button
-          disabled={!source}
+          disabled={!canDownload}
           onClick={handleDownload}
           className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:pointer-events-none disabled:opacity-30"
           title="Download converted output"
