@@ -42,7 +42,6 @@ fn xml_escape(input: &str) -> String {
 // ─── Image helpers ──────────────────────────────────────────────────────────
 
 /// Parse image dimensions (width, height) in pixels from PNG or JPEG headers.
-#[allow(dead_code)]
 fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
     // PNG: magic bytes + IHDR chunk at offset 16 (width) and 20 (height)
     if data.len() >= 24 && data[0..4] == [0x89, 0x50, 0x4E, 0x47] {
@@ -72,7 +71,6 @@ fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
 }
 
 /// Detect MIME type from magic bytes.
-#[allow(dead_code)]
 fn detect_mime(data: &[u8]) -> Option<&'static str> {
     if data.len() >= 4 && data[0..4] == [0x89, 0x50, 0x4E, 0x47] {
         Some("image/png")
@@ -111,6 +109,7 @@ struct DocxBuilder {
     numbering_xml: Option<String>,
     numbering_defs: Vec<NumberingDef>,
     footnote_id_map: HashMap<String, u32>,
+    resources: HashMap<String, docmux_ast::ResourceData>,
     next_rel_id: u32,
     next_footnote_id: u32,
     next_image_id: u32,
@@ -127,6 +126,7 @@ impl DocxBuilder {
             numbering_xml: None,
             numbering_defs: Vec::new(),
             footnote_id_map: HashMap::new(),
+            resources: HashMap::new(),
             next_rel_id: 1,
             next_footnote_id: 2,
             next_image_id: 1,
@@ -516,15 +516,28 @@ impl DocxBuilder {
         .unwrap();
     }
 
-    /// Embed a local image file and return (rel_id, width_emu, height_emu).
+    /// Embed an image and return (rel_id, width_emu, height_emu).
+    /// Resolution order: doc.resources → filesystem → None (fallback).
     fn embed_image(&mut self, url: &str) -> Option<(String, u32, u32)> {
-        let path = std::path::Path::new(url);
-        if !path.exists() {
-            return None;
-        }
+        // 1. Check doc.resources
+        let data = if let Some(res) = self.resources.get(url) {
+            res.data.clone()
+        } else {
+            // 2. Filesystem fallback
+            let path = std::path::Path::new(url);
+            if path.exists() {
+                std::fs::read(path).ok()?
+            } else {
+                return None;
+            }
+        };
 
-        let data = std::fs::read(path).ok()?;
-        let ext = path.extension()?.to_str()?;
+        let mime = detect_mime(&data);
+        let ext = match mime {
+            Some("image/png") => "png",
+            Some("image/jpeg") => "jpeg",
+            _ => std::path::Path::new(url).extension()?.to_str()?,
+        };
 
         let filename = format!("image{}.{}", self.next_image_id, ext);
         self.next_image_id += 1;
@@ -534,12 +547,23 @@ impl DocxBuilder {
             &format!("media/{filename}"),
         );
 
+        // Compute dimensions: real size capped at 6 inches wide
+        let (cx, cy) = match image_dimensions(&data) {
+            Some((w, h)) if w > 0 && h > 0 => {
+                let emu_w = w * 914400 / 96;
+                let emu_h = h * 914400 / 96;
+                let max_width: u32 = 5_486_400; // 6 inches
+                if emu_w > max_width {
+                    let scale = max_width as f64 / emu_w as f64;
+                    (max_width, (emu_h as f64 * scale) as u32)
+                } else {
+                    (emu_w, emu_h)
+                }
+            }
+            _ => (3_657_600, 2_743_200), // fallback 4"×3"
+        };
+
         self.media.push((filename, data));
-
-        // Default size: 4in × 3in (1 inch = 914400 EMU)
-        let cx: u32 = 3_657_600;
-        let cy: u32 = 2_743_200;
-
         Some((rel_id, cx, cy))
     }
 
@@ -1085,6 +1109,7 @@ impl Writer for DocxWriter {
 
     fn write_bytes(&self, doc: &Document, _opts: &WriteOptions) -> Result<Vec<u8>> {
         let mut builder = DocxBuilder::new();
+        builder.resources = doc.resources.clone();
         // First pass: collect footnote definitions
         builder.collect_footnotes(&doc.content);
         builder.write_metadata(&doc.metadata);
@@ -1910,5 +1935,120 @@ mod tests {
     #[test]
     fn mime_from_unknown_bytes() {
         assert_eq!(detect_mime(&[0x00, 0x01]), None);
+    }
+
+    #[test]
+    fn image_embeds_from_resources() {
+        let png_bytes: Vec<u8> = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
+            0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let mut resources = HashMap::new();
+        resources.insert(
+            "photo.png".to_string(),
+            docmux_ast::ResourceData {
+                mime_type: "image/png".to_string(),
+                data: png_bytes,
+            },
+        );
+        let doc = Document {
+            content: vec![Block::Figure {
+                image: docmux_ast::Image {
+                    url: "photo.png".into(),
+                    alt: vec![Inline::Text {
+                        value: "A photo".into(),
+                    }],
+                    title: None,
+                    attrs: None,
+                },
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            resources,
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+
+        let cursor = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor).unwrap();
+        let mut found = false;
+        for i in 0..archive.len() {
+            if archive
+                .by_index(i)
+                .unwrap()
+                .name()
+                .starts_with("word/media/")
+            {
+                found = true;
+            }
+        }
+        assert!(
+            found,
+            "Image from resources should be embedded in word/media/"
+        );
+
+        let xml = extract_document_xml(&bytes);
+        assert!(xml.contains("<w:drawing>") || xml.contains("<wp:inline"));
+    }
+
+    #[test]
+    fn image_dimensions_capped_at_six_inches() {
+        // 1200x600 PNG header → 12.5"x6.25" at 96 DPI → capped to 6"x3"
+        let mut png = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52,
+        ];
+        png.extend_from_slice(&1200_u32.to_be_bytes());
+        png.extend_from_slice(&600_u32.to_be_bytes());
+        png.extend_from_slice(&[0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE]);
+        png.extend_from_slice(&[
+            0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC, 0x33, 0x00, 0x00, 0x00, 0x00,
+            0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ]);
+
+        let mut resources = HashMap::new();
+        resources.insert(
+            "wide.png".to_string(),
+            docmux_ast::ResourceData {
+                mime_type: "image/png".to_string(),
+                data: png,
+            },
+        );
+        let doc = Document {
+            content: vec![Block::Figure {
+                image: docmux_ast::Image {
+                    url: "wide.png".into(),
+                    alt: vec![],
+                    title: None,
+                    attrs: None,
+                },
+                caption: None,
+                label: None,
+                attrs: None,
+            }],
+            resources,
+            ..Default::default()
+        };
+
+        let w = DocxWriter::new();
+        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let xml = extract_document_xml(&bytes);
+
+        // Max width = 6 inches = 5486400 EMU, height scales proportionally
+        assert!(
+            xml.contains("cx=\"5486400\""),
+            "Width should be capped at 6 inches (5486400 EMU), got:\n{xml}"
+        );
+        assert!(
+            xml.contains("cy=\"2743200\""),
+            "Height should scale proportionally to 3 inches (2743200 EMU), got:\n{xml}"
+        );
     }
 }
