@@ -322,6 +322,15 @@ fn main() {
     // Apply -M metadata overrides
     apply_metadata_overrides(&mut doc.metadata, &cli.metadata);
 
+    // Pre-load image files into doc.resources for embedding
+    if let Some(first_input) = cli.input.first() {
+        if first_input.to_str() != Some("-") {
+            if let Some(base_dir) = first_input.parent() {
+                preload_image_resources(&mut doc, base_dir);
+            }
+        }
+    }
+
     // Apply --shift-heading-level-by
     if let Some(shift) = cli.shift_heading_level_by {
         shift_headings(&mut doc.content, shift);
@@ -786,6 +795,94 @@ fn wrap_paragraph(para: &str, columns: usize, out: &mut String) {
         col += wlen;
     }
     out.push('\n');
+}
+
+/// Walk the AST, resolve relative image URLs against `base_dir`, read the
+/// files, and insert them into `doc.resources` so writers can embed them.
+fn preload_image_resources(doc: &mut docmux_ast::Document, base_dir: &std::path::Path) {
+    let urls = collect_image_urls(&doc.content);
+    for url in urls {
+        if doc.resources.contains_key(&url) {
+            continue; // already loaded (e.g. from DOCX reader)
+        }
+        let path = base_dir.join(&url);
+        if let Ok(data) = std::fs::read(&path) {
+            let mime = detect_mime_cli(&data).unwrap_or("application/octet-stream");
+            doc.resources.insert(
+                url,
+                docmux_ast::ResourceData {
+                    mime_type: mime.to_string(),
+                    data,
+                },
+            );
+        }
+    }
+}
+
+/// Recursively collect image URLs from a slice of blocks.
+fn collect_image_urls(blocks: &[Block]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for block in blocks {
+        match block {
+            Block::Figure { image, .. } => urls.push(image.url.clone()),
+            Block::Paragraph { content } | Block::Heading { content, .. } => {
+                collect_inline_image_urls(content, &mut urls);
+            }
+            Block::BlockQuote { content } | Block::Div { content, .. } => {
+                urls.extend(collect_image_urls(content));
+            }
+            Block::Admonition { content, .. } => {
+                urls.extend(collect_image_urls(content));
+            }
+            Block::List { items, .. } => {
+                for item in items {
+                    urls.extend(collect_image_urls(&item.content));
+                }
+            }
+            Block::FootnoteDef { content, .. } => {
+                urls.extend(collect_image_urls(content));
+            }
+            _ => {}
+        }
+    }
+    urls
+}
+
+/// Recursively collect image URLs from a slice of inlines.
+fn collect_inline_image_urls(inlines: &[docmux_ast::Inline], urls: &mut Vec<String>) {
+    for inline in inlines {
+        match inline {
+            docmux_ast::Inline::Image(img) => urls.push(img.url.clone()),
+            docmux_ast::Inline::Emphasis { content }
+            | docmux_ast::Inline::Strong { content }
+            | docmux_ast::Inline::Strikethrough { content }
+            | docmux_ast::Inline::Underline { content }
+            | docmux_ast::Inline::Superscript { content }
+            | docmux_ast::Inline::Subscript { content }
+            | docmux_ast::Inline::SmallCaps { content }
+            | docmux_ast::Inline::Quoted { content, .. } => {
+                collect_inline_image_urls(content, urls);
+            }
+            docmux_ast::Inline::Link { content, .. } => {
+                collect_inline_image_urls(content, urls);
+            }
+            docmux_ast::Inline::Span { content, .. } => {
+                collect_inline_image_urls(content, urls);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Detect MIME type from magic bytes (PNG and JPEG only).
+fn detect_mime_cli(data: &[u8]) -> Option<&'static str> {
+    if data.len() >= 4 && data[0..4] == [0x89, 0x50, 0x4E, 0x47] {
+        Some("image/png")
+    } else if data.len() >= 3 && data[0..3] == [0xFF, 0xD8, 0xFF] {
+        Some("image/jpeg")
+    } else {
+        None
+    }
 }
 
 /// Apply `-M KEY=VAL` overrides to document metadata.
