@@ -1,9 +1,12 @@
+import { useRef, useCallback } from "react";
 import { FileText, FolderOpen, FileUp } from "lucide-react";
 import MonacoEditor from "@monaco-editor/react";
+import type { editor as monacoEditor } from "monaco-editor";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useActiveFile } from "@/components/editor/useActiveFile";
 import { useDocxImport } from "@/hooks/useDocxImport";
 import { useDropZone } from "@/hooks/useDropZone";
+import { useImageDrop } from "@/hooks/useImageDrop";
 import { getMonacoLanguage, isBinaryFormat } from "@/lib/formats";
 
 interface EmptyStateProps {
@@ -33,7 +36,7 @@ function DropOverlay() {
     <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
       <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-blue-500 px-10 py-8">
         <FileUp className="h-8 w-8 text-blue-400" />
-        <p className="text-sm font-medium text-blue-300">Drop .docx file</p>
+        <p className="text-sm font-medium text-blue-300">Drop file</p>
       </div>
     </div>
   );
@@ -55,7 +58,34 @@ export function Editor() {
   const { activeWorkspaceId, activeFileId } = useWorkspace();
   const { content, filePath, onChange } = useActiveFile(activeFileId);
   const { importDocxFile, openFilePicker } = useDocxImport();
-  const { isDragging, dropProps } = useDropZone(importDocxFile);
+  const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
+  const handleImageDrop = useImageDrop();
+
+  const onImage = useCallback(
+    async (file: File) => {
+      const filename = await handleImageDrop(file);
+      if (!filename || !editorRef.current) return;
+      const ed = editorRef.current;
+      const pos = ed.getPosition();
+      if (pos) {
+        const text = `![](${filename})`;
+        ed.executeEdits("image-drop", [
+          {
+            range: {
+              startLineNumber: pos.lineNumber,
+              startColumn: pos.column,
+              endLineNumber: pos.lineNumber,
+              endColumn: pos.column,
+            },
+            text,
+          },
+        ]);
+      }
+    },
+    [handleImageDrop],
+  );
+
+  const { isDragging, dropProps } = useDropZone(importDocxFile, onImage);
 
   const isBinary = filePath ? isBinaryFormat(filePath) : false;
 
@@ -101,6 +131,7 @@ export function Editor() {
     <div className="relative h-full" {...dropProps}>
       {isDragging && <DropOverlay />}
       <MonacoEditor
+        onMount={(editor) => { editorRef.current = editor; }}
         height="100%"
         theme="vs-dark"
         language={getMonacoLanguage(filePath)}

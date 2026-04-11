@@ -1,6 +1,17 @@
 import { useState, useCallback, type DragEvent } from "react";
 
-export function useDropZone(onFile: (file: File) => void) {
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
+
+function getFileExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+export function isImageFile(file: File): boolean {
+  return IMAGE_EXTENSIONS.has(getFileExtension(file.name));
+}
+
+export function useDropZone(onFile: (file: File) => void, onImage?: (file: File) => void) {
   const [dragCount, setDragCount] = useState(0);
 
   const handleDragEnter = useCallback((e: DragEvent) => {
@@ -22,9 +33,14 @@ export function useDropZone(onFile: (file: File) => void) {
       e.preventDefault();
       setDragCount(0);
       const file = e.dataTransfer.files[0];
-      if (file) onFile(file);
+      if (!file) return;
+      if (onImage && isImageFile(file)) {
+        onImage(file);
+      } else {
+        onFile(file);
+      }
     },
-    [onFile],
+    [onFile, onImage],
   );
 
   return {
