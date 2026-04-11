@@ -3,6 +3,7 @@
 //! WebAssembly bindings for docmux, exposing the conversion pipeline
 //! to JavaScript/TypeScript via wasm-bindgen.
 
+use docmux_ast::ResourceData;
 use docmux_core::{Registry, Transform, WriteOptions};
 use docmux_reader_docx::DocxReader;
 use docmux_reader_html::HtmlReader;
@@ -20,6 +21,7 @@ use docmux_writer_markdown::MarkdownWriter;
 use docmux_writer_myst::MystWriter;
 use docmux_writer_plaintext::PlaintextWriter;
 use docmux_writer_typst::TypstWriter;
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 fn build_registry() -> Registry {
@@ -43,6 +45,32 @@ fn build_registry() -> Registry {
     reg
 }
 
+/// Convert a JS `Map<string, Uint8Array>` into the AST resources format.
+fn js_map_to_resources(map: &js_sys::Map) -> HashMap<String, ResourceData> {
+    let mut resources = HashMap::new();
+    map.for_each(&mut |value, key| {
+        if let Some(name) = key.as_string() {
+            let arr = js_sys::Uint8Array::from(value);
+            let data = arr.to_vec();
+            let mime = if data.len() >= 4 && data[0..4] == [0x89, 0x50, 0x4E, 0x47] {
+                "image/png"
+            } else if data.len() >= 3 && data[0..3] == [0xFF, 0xD8, 0xFF] {
+                "image/jpeg"
+            } else {
+                "application/octet-stream"
+            };
+            resources.insert(
+                name,
+                ResourceData {
+                    mime_type: mime.to_string(),
+                    data,
+                },
+            );
+        }
+    });
+    resources
+}
+
 /// Convert a document from one format to another (fragment mode).
 ///
 /// # Arguments
@@ -58,6 +86,106 @@ pub fn convert(input: &str, from: &str, to: &str) -> Result<String, JsError> {
 #[wasm_bindgen(js_name = "convertStandalone")]
 pub fn convert_standalone(input: &str, from: &str, to: &str) -> Result<String, JsError> {
     convert_inner(input, from, to, true)
+}
+
+/// Convert text input to string output, with image resources for embedding.
+#[wasm_bindgen(js_name = "convertWithResources")]
+pub fn convert_with_resources(
+    input: &str,
+    from: &str,
+    to: &str,
+    resources: &js_sys::Map,
+) -> Result<String, JsError> {
+    let reg = build_registry();
+    let reader = reg
+        .find_reader(from)
+        .ok_or_else(|| JsError::new(&format!("unsupported input format: {from}")))?;
+    let writer = reg
+        .find_writer(to)
+        .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
+    let mut doc = reader
+        .read(input)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    doc.resources = js_map_to_resources(resources);
+    let ctx = docmux_core::TransformContext::default();
+    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
+    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    let _ = TocTransform::new().transform(&mut doc, &ctx);
+    let opts = WriteOptions {
+        standalone: false,
+        highlight_style: if to == "html" {
+            Some("InspiredGitHub".into())
+        } else {
+            None
+        },
+        ..Default::default()
+    };
+    writer
+        .write(&doc, &opts)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Convert text input to binary output (e.g. markdown → DOCX), with image resources.
+#[wasm_bindgen(js_name = "convertToBytes")]
+pub fn convert_to_bytes(
+    input: &str,
+    from: &str,
+    to: &str,
+    resources: &js_sys::Map,
+) -> Result<js_sys::Uint8Array, JsError> {
+    let reg = build_registry();
+    let reader = reg
+        .find_reader(from)
+        .ok_or_else(|| JsError::new(&format!("unsupported input format: {from}")))?;
+    let writer = reg
+        .find_writer(to)
+        .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
+    let mut doc = reader
+        .read(input)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    doc.resources = js_map_to_resources(resources);
+    let ctx = docmux_core::TransformContext::default();
+    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
+    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    let _ = TocTransform::new().transform(&mut doc, &ctx);
+    let opts = WriteOptions::default();
+    let bytes = writer
+        .write_bytes(&doc, &opts)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(js_sys::Uint8Array::from(&bytes[..]))
+}
+
+/// Convert binary input to binary output (e.g. DOCX → DOCX), with additional resources.
+#[wasm_bindgen(js_name = "convertBytesToBytes")]
+pub fn convert_bytes_to_bytes(
+    input: &[u8],
+    from: &str,
+    to: &str,
+    resources: &js_sys::Map,
+) -> Result<js_sys::Uint8Array, JsError> {
+    let reg = build_registry();
+    let binary_reader = reg
+        .find_binary_reader(from)
+        .ok_or_else(|| JsError::new(&format!("unsupported binary input format: {from}")))?;
+    let writer = reg
+        .find_writer(to)
+        .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
+    let mut doc = binary_reader
+        .read_bytes(input)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    // Merge additional resources (don't overwrite existing from reader)
+    for (k, v) in js_map_to_resources(resources) {
+        doc.resources.entry(k).or_insert(v);
+    }
+    let ctx = docmux_core::TransformContext::default();
+    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
+    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    let _ = TocTransform::new().transform(&mut doc, &ctx);
+    let opts = WriteOptions::default();
+    let bytes = writer
+        .write_bytes(&doc, &opts)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(js_sys::Uint8Array::from(&bytes[..]))
 }
 
 fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<String, JsError> {
