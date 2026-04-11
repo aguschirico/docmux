@@ -3,6 +3,9 @@ import {
   convertStandalone as wasmConvertStandalone,
   convertBytes as wasmConvertBytes,
   convertBytesStandalone as wasmConvertBytesStandalone,
+  convertWithResources as wasmConvertWithResources,
+  convertToBytes as wasmConvertToBytes,
+  convertBytesToBytes as wasmConvertBytesToBytes,
   parseToJson as wasmParseToJson,
   parseBytesToJson as wasmParseBytesToJson,
   markdownToHtml as wasmMarkdownToHtml,
@@ -87,6 +90,33 @@ export function parseBytesToJson(
 
 export function markdownToHtml(input: string): Promise<ConvertOutcome> {
   return callWasm(wasmMarkdownToHtml, input);
+}
+
+export function convertWithResources(
+  input: string,
+  from: string,
+  to: string,
+  resources: Map<string, Uint8Array>,
+): Promise<ConvertOutcome> {
+  return callWasm(wasmConvertWithResources, input, from, to, resources);
+}
+
+export async function convertToBytes(
+  input: string,
+  from: string,
+  to: string,
+  resources: Map<string, Uint8Array>,
+): Promise<Uint8Array> {
+  return wasmConvertToBytes(input, from, to, resources);
+}
+
+export async function convertBytesToBytes(
+  input: Uint8Array,
+  from: string,
+  to: string,
+  resources: Map<string, Uint8Array>,
+): Promise<Uint8Array> {
+  return wasmConvertBytesToBytes(input, from, to, resources);
 }
 
 export async function getInputFormats(): Promise<string[]> {

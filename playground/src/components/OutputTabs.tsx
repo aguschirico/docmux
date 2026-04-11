@@ -23,6 +23,7 @@ const OUTPUT_FORMATS = [
   { value: "typst", label: "Typst" },
   { value: "markdown", label: "Markdown" },
   { value: "plain", label: "Plain Text" },
+  { value: "docx", label: "DOCX" },
 ] as const;
 
 const FORMAT_TO_MONACO: Record<string, string> = {
@@ -31,6 +32,7 @@ const FORMAT_TO_MONACO: Record<string, string> = {
   typst: "plaintext",
   markdown: "markdown",
   plain: "plaintext",
+  docx: "plaintext",
 };
 
 const FORMAT_TO_EXT: Record<string, string> = {
@@ -39,6 +41,7 @@ const FORMAT_TO_EXT: Record<string, string> = {
   typst: "typ",
   markdown: "md",
   plain: "txt",
+  docx: "docx",
 };
 
 export function OutputTabs() {
@@ -133,11 +136,17 @@ export function OutputTabs() {
         <HtmlPreview html={preview} />
       </TabsContent>
       <TabsContent value="source" className="flex-1 overflow-auto">
-        <ReadOnlyEditor
-          value={source}
-          language={FORMAT_TO_MONACO[outputFormat] ?? "plaintext"}
-          emptyMessage="Select a file and output format"
-        />
+        {isBinaryFormat(outputFormat) ? (
+          <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+            Binary format — use Export to download
+          </div>
+        ) : (
+          <ReadOnlyEditor
+            value={source}
+            language={FORMAT_TO_MONACO[outputFormat] ?? "plaintext"}
+            emptyMessage="Select a file and output format"
+          />
+        )}
       </TabsContent>
       <TabsContent value="ast" className="flex-1 overflow-auto">
         <ReadOnlyEditor
