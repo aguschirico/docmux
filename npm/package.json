@@ -29,11 +29,16 @@
         "import": "./bundler/docmux_wasm.js",
         "types": "./bundler/docmux_wasm.d.ts"
       }
+    },
+    "./web": {
+      "import": "./web/docmux_wasm.js",
+      "types": "./web/docmux_wasm.d.ts"
     }
   },
   "files": [
     "dist/",
     "bundler/",
+    "web/",
     "node/",
     "README.md",
     "LICENSE"

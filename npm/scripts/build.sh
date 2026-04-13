@@ -10,6 +10,12 @@ wasm-pack build "$REPO_ROOT/crates/docmux-wasm" \
   --out-dir "$NPM_DIR/bundler" \
   --out-name docmux_wasm
 
+echo "Building web target..."
+wasm-pack build "$REPO_ROOT/crates/docmux-wasm" \
+  --target web \
+  --out-dir "$NPM_DIR/web" \
+  --out-name docmux_wasm
+
 echo "Building nodejs target..."
 wasm-pack build "$REPO_ROOT/crates/docmux-wasm" \
   --target nodejs \
@@ -18,6 +24,7 @@ wasm-pack build "$REPO_ROOT/crates/docmux-wasm" \
 
 # Clean up wasm-pack artifacts
 rm -f "$NPM_DIR/bundler/package.json" "$NPM_DIR/bundler/.gitignore" "$NPM_DIR/bundler/README.md"
+rm -f "$NPM_DIR/web/package.json" "$NPM_DIR/web/.gitignore" "$NPM_DIR/web/README.md"
 rm -f "$NPM_DIR/node/package.json" "$NPM_DIR/node/.gitignore" "$NPM_DIR/node/README.md"
 
 # ── Convert node target from CJS to ESM ──────────────────────────────
