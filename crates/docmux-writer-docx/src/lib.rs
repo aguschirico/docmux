@@ -1107,12 +1107,14 @@ impl Writer for DocxWriter {
         ))
     }
 
-    fn write_bytes(&self, doc: &Document, _opts: &WriteOptions) -> Result<Vec<u8>> {
+    fn write_bytes(&self, doc: &Document, opts: &WriteOptions) -> Result<Vec<u8>> {
         let mut builder = DocxBuilder::new();
         builder.resources = doc.resources.clone();
         // First pass: collect footnote definitions
         builder.collect_footnotes(&doc.content);
-        builder.write_metadata(&doc.metadata);
+        if opts.standalone {
+            builder.write_metadata(&doc.metadata);
+        }
         builder.write_blocks(&doc.content);
         builder.numbering_xml = builder.build_numbering_xml();
         builder.assemble_zip()
@@ -1360,7 +1362,11 @@ mod tests {
             ..Default::default()
         };
         let w = DocxWriter::new();
-        let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
+        let opts = WriteOptions {
+            standalone: true,
+            ..Default::default()
+        };
+        let bytes = w.write_bytes(&doc, &opts).unwrap();
         let xml = extract_document_xml(&bytes);
         assert!(
             xml.contains(r#"<w:pStyle w:val="Title"/>"#),

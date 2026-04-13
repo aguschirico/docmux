@@ -8,9 +8,11 @@ fn write_docx(markdown: &str) -> Vec<u8> {
     let reader = MarkdownReader::new();
     let doc = reader.read(markdown).expect("parse failed");
     let writer = DocxWriter::new();
-    writer
-        .write_bytes(&doc, &WriteOptions::default())
-        .expect("write failed")
+    let opts = WriteOptions {
+        standalone: true,
+        ..Default::default()
+    };
+    writer.write_bytes(&doc, &opts).expect("write failed")
 }
 
 fn extract_xml(bytes: &[u8], name: &str) -> String {
