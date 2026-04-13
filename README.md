@@ -14,7 +14,7 @@ docmux converts between markup formats using a modular **Reader → AST → Writ
 | HTML5 | ✅ | ✅ |
 | LaTeX | ✅ | ✅ |
 | Typst | ✅ | ✅ |
-| MyST Markdown | ✅ | — |
+| MyST Markdown | ✅ | ✅ |
 | DOCX | ✅ | ✅ |
 | Plaintext | — | ✅ |
 
@@ -59,6 +59,15 @@ if (result.error) {
 }
 ```
 
+For Vite or vanilla JS without bundler plugins, use the web target:
+
+```typescript
+import init, { convert } from "@docmux/wasm/web";
+
+await init();
+const html = convert("# Hello", "markdown", "html");
+```
+
 See the [@docmux/wasm README](npm/README.md) for full API documentation.
 
 ### Rust library
@@ -80,8 +89,9 @@ let html = writer.write(&doc, &WriteOptions::default())?;
 - **13+ block types, 16+ inline types** — math, citations, cross-references, admonitions, tables, footnotes
 - **Syntax highlighting** via syntect (HTML and LaTeX output)
 - **Template engine** — pandoc-compatible `$variable$` syntax with conditionals and loops
-- **Transforms** — table of contents, section numbering, cross-reference resolution, section divs
-- **CLI parity** — `--standalone`, `--toc`, `--number-sections`, `--template`, `--math`, `--css`, `--wrap`, and more
+- **Transforms** — table of contents, section numbering, cross-reference resolution, CSL citations, math notation conversion, section divs
+- **Image embedding** — real dimension parsing (PNG/JPEG), drag-and-drop in playground, resource-aware DOCX writer
+- **CLI parity** — `--standalone`, `--toc`, `--number-sections`, `--template`, `--bibliography`, `--csl`, `--math`, `--css`, `--wrap`, and more
 
 ## Architecture
 

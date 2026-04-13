@@ -102,7 +102,8 @@
 - [x] `docmux-writer-markdown` — CommonMark/GFM roundtrip, normalization (28 tests)
 - [x] `docmux-writer-plaintext` — stripped text output (29 tests)
 - [x] `docmux-reader-html` — HTML reader with scraper/html5ever (29 tests)
-- [x] `docmux-writer-docx` — OOXML output via zip + XML generation (20 unit + 1 integration test)
+- [x] `docmux-writer-docx` — OOXML output via zip + XML generation (29 unit + 1 integration test)
+- [x] `docmux-writer-myst` — MyST Markdown output
 
 ### Template system
 
@@ -167,6 +168,15 @@
 - [ ] Emoji replacement (`:name:` → Unicode)
 - [ ] Encoding detection / BOM handling
 - [x] Publish to npm (automated via CI on tag push)
+- [x] `@docmux/wasm/web` target for Vite / vanilla JS (explicit `init()`)
+
+### DOCX image pipeline
+
+- [x] Resource-aware image embedding (`doc.resources` → filesystem → fallback)
+- [x] PNG/JPEG dimension parsing from headers, capped at 6" wide
+- [x] CLI pre-loads relative image paths into `doc.resources`
+- [x] WASM: `convertToBytes`, `convertBytesToBytes`, `convertWithResources`
+- [x] Playground: DOCX output format, binary download, image drag-and-drop
 - [ ] Publish to crates.io
 
 ## Phase 5 — Long Tail
