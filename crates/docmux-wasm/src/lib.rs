@@ -13,7 +13,6 @@ use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
 use docmux_transform_crossref::CrossRefTransform;
 use docmux_transform_number_sections::NumberSectionsTransform;
-use docmux_transform_toc::TocTransform;
 use docmux_writer_docx::DocxWriter;
 use docmux_writer_html::HtmlWriter;
 use docmux_writer_latex::LatexWriter;
@@ -110,7 +109,6 @@ pub fn convert_with_resources(
     let ctx = docmux_core::TransformContext::default();
     let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
     let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
-    let _ = TocTransform::new().transform(&mut doc, &ctx);
     let opts = WriteOptions {
         standalone: false,
         highlight_style: if to == "html" {
@@ -147,7 +145,6 @@ pub fn convert_to_bytes(
     let ctx = docmux_core::TransformContext::default();
     let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
     let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
-    let _ = TocTransform::new().transform(&mut doc, &ctx);
     let opts = WriteOptions::default();
     let bytes = writer
         .write_bytes(&doc, &opts)
@@ -180,7 +177,6 @@ pub fn convert_bytes_to_bytes(
     let ctx = docmux_core::TransformContext::default();
     let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
     let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
-    let _ = TocTransform::new().transform(&mut doc, &ctx);
     let opts = WriteOptions::default();
     let bytes = writer
         .write_bytes(&doc, &opts)
@@ -203,11 +199,10 @@ fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<
         .read(input)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    // Run transforms in order: number sections → cross-refs → table of contents.
+    // Run transforms: number sections → cross-refs.
     let ctx = docmux_core::TransformContext::default();
     let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
     let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
-    let _ = TocTransform::new().transform(&mut doc, &ctx);
 
     let opts = WriteOptions {
         standalone,
@@ -295,7 +290,6 @@ fn convert_bytes_inner(
     let ctx = docmux_core::TransformContext::default();
     let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
     let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
-    let _ = TocTransform::new().transform(&mut doc, &ctx);
     let opts = WriteOptions {
         standalone,
         highlight_style: if to == "html" {

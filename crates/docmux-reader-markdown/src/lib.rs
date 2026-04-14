@@ -369,6 +369,7 @@ impl MarkdownReader {
         postprocess_raw_inlines(&mut inlines);
         postprocess_bracketed_spans(&mut inlines);
         postprocess_citations(&mut inlines);
+        postprocess_image_attrs(&mut inlines);
         inlines
     }
 
@@ -1339,6 +1340,83 @@ fn parse_bracketed_citation(content: &str) -> Citation {
     };
 
     Citation { items, mode }
+}
+
+// ─── Image attribute post-processing ────────────────────────────────────────
+
+/// Walk `Vec<Inline>` and attach trailing `{...}` attribute blocks to preceding
+/// `Image` nodes.  Comrak emits `{width=100%}` as a sibling `Text` node — this
+/// pass detects the pattern and moves the parsed attributes into `Image.attrs`.
+fn postprocess_image_attrs(inlines: &mut Vec<Inline>) {
+    let mut i = 0;
+    while i + 1 < inlines.len() {
+        // Recurse into container inlines first.
+        match &mut inlines[i] {
+            Inline::Emphasis { content }
+            | Inline::Strong { content }
+            | Inline::Strikethrough { content }
+            | Inline::Superscript { content }
+            | Inline::Subscript { content }
+            | Inline::SmallCaps { content }
+            | Inline::Underline { content }
+            | Inline::Span { content, .. }
+            | Inline::Link { content, .. } => {
+                postprocess_image_attrs(content);
+            }
+            _ => {}
+        }
+
+        let is_image = matches!(&inlines[i], Inline::Image(_));
+        if !is_image {
+            i += 1;
+            continue;
+        }
+
+        // Check if the next node is a Text starting with `{`
+        let parsed = if let Inline::Text { value } = &inlines[i + 1] {
+            value.find('}').and_then(|end| {
+                let candidate = &value[..=end];
+                parse_attr_block(candidate).map(|attrs| (attrs, end))
+            })
+        } else {
+            None
+        };
+        if let Some((attrs, end)) = parsed {
+            // Attach parsed attrs to the Image
+            if let Inline::Image(img) = &mut inlines[i] {
+                img.attrs = Some(attrs);
+            }
+            // Remove or trim the consumed text
+            let remaining = if let Inline::Text { value } = &inlines[i + 1] {
+                value[end + 1..].to_string()
+            } else {
+                String::new()
+            };
+            if remaining.is_empty() {
+                inlines.remove(i + 1);
+            } else {
+                inlines[i + 1] = Inline::Text { value: remaining };
+            }
+            continue;
+        }
+        i += 1;
+    }
+
+    // Handle the last element's children
+    if let Some(
+        Inline::Emphasis { content }
+        | Inline::Strong { content }
+        | Inline::Strikethrough { content }
+        | Inline::Superscript { content }
+        | Inline::Subscript { content }
+        | Inline::SmallCaps { content }
+        | Inline::Underline { content }
+        | Inline::Span { content, .. }
+        | Inline::Link { content, .. },
+    ) = inlines.last_mut()
+    {
+        postprocess_image_attrs(content);
+    }
 }
 
 #[cfg(test)]
@@ -2365,12 +2443,67 @@ mod tests {
             );
         }
     }
-}
 
-// TEMP TEST - will remove
-#[test]
-#[ignore]
-fn temp_citation_in_link_text() {
-    let doc = MarkdownReader::new().read("See [text @foo](url)").unwrap();
-    eprintln!("{:?}", doc.content);
+    // ─── Image attribute parsing ────────────────────────────────────────────
+
+    #[test]
+    fn image_with_width_attr() {
+        let doc = MarkdownReader::new()
+            .read("![alt](img.pdf){width=100%}")
+            .unwrap();
+        let inlines = first_para_inlines(&doc);
+        assert_eq!(
+            inlines.len(),
+            1,
+            "should be a single Image inline, got: {inlines:?}"
+        );
+        match &inlines[0] {
+            Inline::Image(img) => {
+                assert_eq!(img.url, "img.pdf");
+                let attrs = img.attrs.as_ref().expect("image should have attrs");
+                assert_eq!(
+                    attrs.key_values.get("width").map(|s| s.as_str()),
+                    Some("100%"),
+                    "width attr should be parsed"
+                );
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_with_multiple_attrs() {
+        let doc = MarkdownReader::new()
+            .read("![](photo.png){#fig1 .responsive width=50%}")
+            .unwrap();
+        let inlines = first_para_inlines(&doc);
+        match &inlines[0] {
+            Inline::Image(img) => {
+                let attrs = img.attrs.as_ref().expect("image should have attrs");
+                assert_eq!(attrs.id.as_deref(), Some("fig1"));
+                assert!(attrs.classes.contains(&"responsive".to_string()));
+                assert_eq!(
+                    attrs.key_values.get("width").map(|s| s.as_str()),
+                    Some("50%")
+                );
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_without_attrs_unchanged() {
+        let doc = MarkdownReader::new().read("![alt](img.png)").unwrap();
+        let inlines = first_para_inlines(&doc);
+        assert_eq!(inlines.len(), 1);
+        match &inlines[0] {
+            Inline::Image(img) => {
+                assert!(
+                    img.attrs.is_none(),
+                    "image without attrs block should have None"
+                );
+            }
+            other => panic!("expected Image, got {other:?}"),
+        }
+    }
 }

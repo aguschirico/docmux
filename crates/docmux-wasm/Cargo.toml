@@ -34,7 +34,6 @@ docmux-writer-docx = { workspace = true }
 
 # Transforms
 docmux-transform-crossref = { workspace = true }
-docmux-transform-toc = { workspace = true }
 docmux-transform-number-sections = { workspace = true }
 
 wasm-bindgen = "0.2"
