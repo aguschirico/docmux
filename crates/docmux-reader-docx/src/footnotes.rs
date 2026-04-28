@@ -69,36 +69,34 @@ pub(crate) fn parse_footnotes(xml: &str) -> Result<FootnoteMap, DocxError> {
                 b"t" => {
                     in_t = false;
                 }
-                b"footnote" => {
-                    if in_footnote {
-                        if let Some(id) = cur_id.take() {
-                            // Skip separator / continuation-separator (ids -1 and 0)
-                            let skip = cur_type
-                                .as_deref()
-                                .map(|t| {
-                                    t == "separator"
-                                        || t == "continuationSeparator"
-                                        || t == "continuationNotice"
-                                })
-                                .unwrap_or(false)
-                                || id == "-1"
-                                || id == "0";
+                b"footnote" if in_footnote => {
+                    if let Some(id) = cur_id.take() {
+                        // Skip separator / continuation-separator (ids -1 and 0)
+                        let skip = cur_type
+                            .as_deref()
+                            .map(|t| {
+                                t == "separator"
+                                    || t == "continuationSeparator"
+                                    || t == "continuationNotice"
+                            })
+                            .unwrap_or(false)
+                            || id == "-1"
+                            || id == "0";
 
-                            if !skip {
-                                let content = if cur_text.is_empty() {
-                                    vec![]
-                                } else {
-                                    vec![Block::Paragraph {
-                                        content: cur_text.clone(),
-                                    }]
-                                };
-                                map.insert(id, content);
-                            }
+                        if !skip {
+                            let content = if cur_text.is_empty() {
+                                vec![]
+                            } else {
+                                vec![Block::Paragraph {
+                                    content: cur_text.clone(),
+                                }]
+                            };
+                            map.insert(id, content);
                         }
-                        cur_text.clear();
-                        cur_type = None;
-                        in_footnote = false;
                     }
+                    cur_text.clear();
+                    cur_type = None;
+                    in_footnote = false;
                 }
                 _ => {}
             },

@@ -147,23 +147,17 @@ pub(crate) fn parse_body(xml: &str, ctx: &ParseContext<'_>) -> Result<Vec<Block>
                     depth = depth.saturating_sub(1);
                 }
             }
-            Ok(Event::Empty(ref e)) => {
-                if in_body && element_kind.is_some() {
-                    append_empty_tag(&mut element_xml, e);
-                }
+            Ok(Event::Empty(ref e)) if in_body && element_kind.is_some() => {
+                append_empty_tag(&mut element_xml, e);
             }
-            Ok(Event::Text(ref e)) => {
-                if in_body && element_kind.is_some() {
-                    let text = e
-                        .unescape()
-                        .map_err(|err| DocxError::Xml(err.to_string()))?;
-                    element_xml.push_str(&quick_xml_escape(&text));
-                }
+            Ok(Event::Text(ref e)) if in_body && element_kind.is_some() => {
+                let text = e
+                    .unescape()
+                    .map_err(|err| DocxError::Xml(err.to_string()))?;
+                element_xml.push_str(&quick_xml_escape(&text));
             }
-            Ok(Event::CData(ref e)) => {
-                if in_body && element_kind.is_some() {
-                    element_xml.push_str(&String::from_utf8_lossy(e.as_ref()));
-                }
+            Ok(Event::CData(ref e)) if in_body && element_kind.is_some() => {
+                element_xml.push_str(&String::from_utf8_lossy(e.as_ref()));
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(DocxError::Xml(e.to_string())),
@@ -787,10 +781,8 @@ fn extract_p_style(xml: &str) -> Option<String> {
                     return get_val_attr(e);
                 }
             }
-            Ok(Event::End(ref e)) => {
-                if in_ppr && e.local_name().as_ref() == b"pPr" {
-                    return None;
-                }
+            Ok(Event::End(ref e)) if in_ppr && e.local_name().as_ref() == b"pPr" => {
+                return None;
             }
             Ok(Event::Eof) => break,
             _ => {}
@@ -828,10 +820,8 @@ fn extract_num_pr(xml: &str) -> (Option<u32>, Option<u32>) {
                     }
                 }
             }
-            Ok(Event::End(ref e)) => {
-                if in_num_pr && e.local_name().as_ref() == b"numPr" {
-                    return (num_id, ilvl);
-                }
+            Ok(Event::End(ref e)) if in_num_pr && e.local_name().as_ref() == b"numPr" => {
+                return (num_id, ilvl);
             }
             Ok(Event::Eof) => break,
             _ => {}
@@ -859,10 +849,8 @@ fn has_bottom_border(xml: &str) -> bool {
                     return true;
                 }
             }
-            Ok(Event::End(ref e)) => {
-                if in_pbdr && e.local_name().as_ref() == b"pBdr" {
-                    return false;
-                }
+            Ok(Event::End(ref e)) if in_pbdr && e.local_name().as_ref() == b"pBdr" => {
+                return false;
             }
             Ok(Event::Eof) => break,
             _ => {}
@@ -897,10 +885,8 @@ fn has_admonition_border(xml: &str) -> bool {
                     }
                 }
             }
-            Ok(Event::End(ref e)) => {
-                if in_pbdr && e.local_name().as_ref() == b"pBdr" {
-                    return false;
-                }
+            Ok(Event::End(ref e)) if in_pbdr && e.local_name().as_ref() == b"pBdr" => {
+                return false;
             }
             Ok(Event::Eof) => break,
             _ => {}
@@ -957,18 +943,14 @@ fn parse_cell_blocks(xml: &str, ctx: &ParseContext<'_>) -> Result<Vec<Block>, Do
                     depth = depth.saturating_sub(1);
                 }
             }
-            Ok(Event::Empty(ref e)) => {
-                if in_paragraph {
-                    append_empty_tag(&mut element_xml, e);
-                }
+            Ok(Event::Empty(ref e)) if in_paragraph => {
+                append_empty_tag(&mut element_xml, e);
             }
-            Ok(Event::Text(ref e)) => {
-                if in_paragraph {
-                    let text = e
-                        .unescape()
-                        .map_err(|err| DocxError::Xml(err.to_string()))?;
-                    element_xml.push_str(&quick_xml_escape(&text));
-                }
+            Ok(Event::Text(ref e)) if in_paragraph => {
+                let text = e
+                    .unescape()
+                    .map_err(|err| DocxError::Xml(err.to_string()))?;
+                element_xml.push_str(&quick_xml_escape(&text));
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(DocxError::Xml(e.to_string())),
@@ -1076,13 +1058,11 @@ fn parse_table(xml: &str, ctx: &ParseContext<'_>) -> Result<Block, DocxError> {
                     }
                 }
             }
-            Ok(Event::Text(ref e)) => {
-                if in_cell && !in_tc_pr {
-                    let text = e
-                        .unescape()
-                        .map_err(|err| DocxError::Xml(err.to_string()))?;
-                    cell_xml.push_str(&quick_xml_escape(&text));
-                }
+            Ok(Event::Text(ref e)) if in_cell && !in_tc_pr => {
+                let text = e
+                    .unescape()
+                    .map_err(|err| DocxError::Xml(err.to_string()))?;
+                cell_xml.push_str(&quick_xml_escape(&text));
             }
             Ok(Event::End(ref e)) => {
                 let local = e.local_name();
