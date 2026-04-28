@@ -91,10 +91,14 @@ impl LatexWriter {
                 ordered,
                 start,
                 items,
+                tight,
                 ..
             } => {
                 let env = if *ordered { "enumerate" } else { "itemize" };
                 out.push_str(&format!("\\begin{{{env}}}\n"));
+                if *tight {
+                    out.push_str("\\tightlist\n");
+                }
                 if *ordered {
                     if let Some(s) = start {
                         if *s != 1 {
@@ -239,24 +243,24 @@ impl LatexWriter {
             col_spec
         };
 
-        out.push_str("\\begin{table}[htbp]\n");
-        out.push_str("\\centering\n");
+        out.push_str(&format!("\\begin{{longtable}}[]{{@{{}}{col_spec}@{{}}}}\n"));
 
-        if let Some(cap) = &table.caption {
-            out.push_str("\\caption{");
-            self.write_inlines(cap, opts, out);
-            out.push_str("}\n");
+        if table.caption.is_some() || table.label.is_some() {
+            if let Some(cap) = &table.caption {
+                out.push_str("\\caption{");
+                self.write_inlines(cap, opts, out);
+                out.push('}');
+            }
+            if let Some(label) = &table.label {
+                out.push_str(&format!("\\label{{{}}}", escape_label(label)));
+            }
+            out.push_str("\\\\\n");
         }
-        if let Some(label) = &table.label {
-            out.push_str(&format!("\\label{{{}}}\n", escape_label(label)));
-        }
 
-        out.push_str(&format!("\\begin{{tabular}}{{{col_spec}}}\n"));
-        out.push_str("\\hline\n");
-
+        out.push_str("\\toprule\n");
         if let Some(header) = &table.header {
             self.write_table_row(header, opts, out, true);
-            out.push_str("\\hline\n");
+            out.push_str("\\midrule\n");
         }
 
         for row in &table.rows {
@@ -264,12 +268,12 @@ impl LatexWriter {
         }
 
         if let Some(foot) = &table.foot {
+            out.push_str("\\midrule\n");
             self.write_table_row(foot, opts, out, false);
         }
 
-        out.push_str("\\hline\n");
-        out.push_str("\\end{tabular}\n");
-        out.push_str("\\end{table}\n");
+        out.push_str("\\bottomrule\n");
+        out.push_str("\\end{longtable}\n");
     }
 
     fn write_table_row(
@@ -672,17 +676,32 @@ fn includegraphics_options(attrs: Option<&Attributes>) -> String {
         return String::new();
     };
     let mut opts: Vec<String> = Vec::new();
+    let mut has_width = false;
+    let mut has_height = false;
     for key in &["width", "height"] {
         if let Some(val) = attrs.key_values.get(*key) {
             let latex_val = css_dim_to_latex(val, key);
             opts.push(format!("{key}={latex_val}"));
+            if *key == "width" {
+                has_width = true;
+            } else {
+                has_height = true;
+            }
         }
     }
     if opts.is_empty() {
-        String::new()
-    } else {
-        format!("[{}]", opts.join(","))
+        return String::new();
     }
+    // Cap the missing dimension so tall/wide images can't overflow the page,
+    // and preserve aspect ratio so no image gets distorted.
+    if !has_height {
+        opts.push("height=\\textheight".to_string());
+    }
+    if !has_width {
+        opts.push("width=\\textwidth".to_string());
+    }
+    opts.push("keepaspectratio".to_string());
+    format!("[{}]", opts.join(","))
 }
 
 /// Convert a CSS-style dimension value to its LaTeX equivalent.
@@ -882,6 +901,13 @@ mod tests {
         assert!(tex.contains("\\maketitle"));
         assert!(tex.contains("\\begin{abstract}"));
         assert!(tex.contains("\\end{document}"));
+        // Pandoc-parity preamble directives (issue #2, items 1-7)
+        assert!(tex.contains("\\usepackage{iftex}"));
+        assert!(tex.contains("\\usepackage{longtable,booktabs}"));
+        assert!(tex.contains("\\usepackage{microtype}"));
+        assert!(tex.contains("\\setcounter{secnumdepth}{-\\maxdimen}"));
+        assert!(tex.contains("\\setlength{\\emergencystretch}{3em}"));
+        assert!(tex.contains("\\providecommand{\\tightlist}"));
     }
 
     #[test]
@@ -1163,8 +1189,10 @@ mod tests {
         };
         let tex = write_latex(&doc);
         assert!(
-            tex.contains("\\includegraphics[width=\\textwidth]{diagram.pdf}"),
-            "100% width should map to width=\\textwidth, got: {tex}"
+            tex.contains(
+                "\\includegraphics[width=\\textwidth,height=\\textheight,keepaspectratio]{diagram.pdf}"
+            ),
+            "100% width should map to width=\\textwidth with height cap and keepaspectratio, got: {tex}"
         );
     }
 
@@ -1192,8 +1220,10 @@ mod tests {
         };
         let tex = write_latex(&doc);
         assert!(
-            tex.contains("\\includegraphics[width=0.5\\textwidth]{photo.png}"),
-            "50% width should map to width=0.5\\textwidth, got: {tex}"
+            tex.contains(
+                "\\includegraphics[width=0.5\\textwidth,height=\\textheight,keepaspectratio]{photo.png}"
+            ),
+            "50% width should map to width=0.5\\textwidth with height cap and keepaspectratio, got: {tex}"
         );
     }
 
@@ -1218,8 +1248,10 @@ mod tests {
         };
         let tex = write_latex(&doc);
         assert!(
-            tex.contains("\\includegraphics[width=10cm]{fig.png}"),
-            "explicit dimension should pass through, got: {tex}"
+            tex.contains(
+                "\\includegraphics[width=10cm,height=\\textheight,keepaspectratio]{fig.png}"
+            ),
+            "explicit dimension should pass through with height cap and keepaspectratio, got: {tex}"
         );
     }
 }

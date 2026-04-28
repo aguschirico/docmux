@@ -6,6 +6,7 @@ Einstein’s famous equation $E = mc^2$ changed physics forever.
 We used the following approach:
 
 \begin{enumerate}
+\tightlist
 \item Collect data from \emph{multiple sources}
 
 \item Apply the transformation $T(x) = \frac{1}{1 + e^{-x}}$
@@ -14,17 +15,14 @@ We used the following approach:
 
 \end{enumerate}
 \subsubsection{Data Collection}\label{data-collection}
-\begin{table}[htbp]
-\centering
-\begin{tabular}{lrr}
-\hline
+\begin{longtable}[]{@{}lrr@{}}
+\toprule
 \textbf{Dataset} & \textbf{Samples} & \textbf{Accuracy} \\
-\hline
+\midrule
 Train & 10000 & 0.95 \\
 Test & 2000 & 0.93 \\
-\hline
-\end{tabular}
-\end{table}
+\bottomrule
+\end{longtable}
 \subsection{Results}\label{results}
 The results were significant:
 
@@ -48,6 +46,7 @@ print(f"Mean accuracy: {results:.4f}")
 Further work is needed in:
 
 \begin{itemize}
+\tightlist
 \item Scaling the approach
 
 \item Testing with \sout{larger} \emph{diverse} datasets

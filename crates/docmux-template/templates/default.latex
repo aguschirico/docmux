@@ -1,13 +1,24 @@
 \documentclass{$if(documentclass)$$documentclass$$else$article$endif$}
+\usepackage{iftex}
+\ifPDFTeX
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
+\else
+\usepackage{unicode-math}
+\fi
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
+\usepackage{longtable,booktabs}
+\usepackage{microtype}
+\UseMicrotypeSet[protrusion]{basicmath}
 \usepackage{hyperref}
 \usepackage{listings}
 \usepackage{alltt}
 \usepackage{xcolor}
 \usepackage[normalem]{ulem}
+\setcounter{secnumdepth}{-\maxdimen}
+\setlength{\emergencystretch}{3em}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 $if(title)$\title{$title$}
 $endif$$if(author)$\author{$for(author)$$author.name$$if(author.affiliation)$ \\ $author.affiliation$$endif$$sep$ \and $endfor$}
 $endif$$if(date)$\date{$date$}
