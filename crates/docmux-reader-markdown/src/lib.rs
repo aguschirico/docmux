@@ -1216,7 +1216,7 @@ fn postprocess_citations(inlines: &mut Vec<Inline>) {
     while i < inlines.len() {
         if let Inline::Text { value } = &inlines[i] {
             if let Some(replacements) = parse_citations_in_text(value) {
-                inlines.splice(i..=i, replacements.into_iter());
+                inlines.splice(i..=i, replacements);
                 continue; // re-check at same index
             }
         }
