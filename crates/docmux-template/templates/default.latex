@@ -13,6 +13,7 @@
 \UseMicrotypeSet[protrusion]{basicmath}
 \usepackage{hyperref}
 \usepackage{listings}
+\lstset{basicstyle=\ttfamily\small,columns=fixed,keepspaces=true,breaklines=true,showstringspaces=false}
 \usepackage{alltt}
 \usepackage{xcolor}
 \usepackage[normalem]{ulem}

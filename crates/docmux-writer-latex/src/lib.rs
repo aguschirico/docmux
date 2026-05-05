@@ -64,6 +64,11 @@ impl LatexWriter {
                         // Highlight failed — fall back to lstlisting
                         write_lstlisting(language.as_deref(), content, &line_opts, out);
                     }
+                } else if language.is_none() && !line_opts.number_lines {
+                    // verbatim is monospace+fixed by construction; lstlisting
+                    // is not, and breaks ASCII-art alignment unless \lstset is
+                    // configured. Skip lstlisting when no options are needed.
+                    write_verbatim(content, out);
                 } else {
                     write_lstlisting(language.as_deref(), content, &line_opts, out);
                 }
@@ -551,6 +556,27 @@ impl Writer for LatexWriter {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/// Emit `\begin{env}[options]\n<content>\end{env}\n`, ensuring a trailing
+/// newline before `\end`. Pass an empty slice for `options` to skip the
+/// bracketed section.
+fn write_literal_env(env: &str, options: &[String], content: &str, out: &mut String) {
+    if options.is_empty() {
+        out.push_str(&format!("\\begin{{{env}}}\n"));
+    } else {
+        out.push_str(&format!("\\begin{{{env}}}[{}]\n", options.join(",")));
+    }
+    out.push_str(content);
+    if !content.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!("\\end{{{env}}}\n"));
+}
+
+/// Write a code block using `\begin{verbatim}...\end{verbatim}`.
+fn write_verbatim(content: &str, out: &mut String) {
+    write_literal_env("verbatim", &[], content, out);
+}
+
 /// Write a code block using `\begin{lstlisting}...\end{lstlisting}`.
 fn write_lstlisting(
     language: Option<&str>,
@@ -568,17 +594,7 @@ fn write_lstlisting(
             options.push(format!("firstnumber={}", line_opts.start_from));
         }
     }
-    if options.is_empty() {
-        out.push_str("\\begin{lstlisting}\n");
-    } else {
-        out.push_str(&format!("\\begin{{lstlisting}}[{}]\n", options.join(",")));
-    }
-    // Code blocks are verbatim — no escaping
-    out.push_str(content);
-    if !content.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str("\\end{lstlisting}\n");
+    write_literal_env("lstlisting", &options, content, out);
 }
 
 /// Write syntax-highlighted code inside an `alltt` environment using
@@ -1016,6 +1032,84 @@ mod tests {
         assert!(
             latex.contains("numbers=left"),
             "should have line numbers option"
+        );
+    }
+
+    #[test]
+    fn plain_fence_uses_verbatim_not_lstlisting() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: None,
+                content: "+---+\n| A |\n+---+".into(),
+                attrs: None,
+                caption: None,
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let tex = write_latex(&doc);
+        assert!(
+            tex.contains("\\begin{verbatim}"),
+            "plain fence must use verbatim, got: {tex}"
+        );
+        assert!(
+            !tex.contains("\\begin{lstlisting}"),
+            "plain fence must NOT use lstlisting, got: {tex}"
+        );
+        assert!(tex.contains("+---+"));
+    }
+
+    #[test]
+    fn plain_fence_with_line_numbers_keeps_lstlisting() {
+        let doc = Document {
+            content: vec![Block::CodeBlock {
+                language: None,
+                content: "alpha\nbeta".into(),
+                attrs: Some(Attributes {
+                    id: None,
+                    classes: vec!["numberLines".into()],
+                    key_values: std::collections::HashMap::new(),
+                }),
+                caption: None,
+                label: None,
+            }],
+            ..Default::default()
+        };
+        let tex = write_latex(&doc);
+        // verbatim does not support numbers=left, so we keep lstlisting here.
+        assert!(
+            tex.contains("\\begin{lstlisting}[numbers=left]"),
+            "plain fence with numberLines must stay in lstlisting, got: {tex}"
+        );
+    }
+
+    #[test]
+    fn standalone_preamble_configures_lstset() {
+        let doc = Document {
+            content: vec![Block::text("Body.")],
+            ..Default::default()
+        };
+        let writer = LatexWriter::new();
+        let opts = WriteOptions {
+            standalone: true,
+            ..Default::default()
+        };
+        let tex = writer.write(&doc, &opts).unwrap();
+        assert!(
+            tex.contains("\\lstset{"),
+            "standalone preamble must configure listings via \\lstset"
+        );
+        assert!(
+            tex.contains("basicstyle=\\ttfamily"),
+            "\\lstset must pin a monospace basicstyle"
+        );
+        assert!(
+            tex.contains("columns=fixed"),
+            "\\lstset must pin columns=fixed for ASCII art alignment"
+        );
+        assert!(
+            tex.contains("keepspaces=true"),
+            "\\lstset must keep spaces to preserve indentation"
         );
     }
 
