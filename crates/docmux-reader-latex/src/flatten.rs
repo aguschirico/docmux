@@ -39,10 +39,23 @@ fn flatten_inner(
     depth: usize,
 ) -> Vec<Token> {
     let mut out = Vec::with_capacity(tokens.len());
+    let mut verbatim_depth: u32 = 0;
     let mut i = 0;
     while i < tokens.len() {
         match &tokens[i] {
-            Token::Command { name, line } if name == "input" || name == "include" => {
+            Token::BeginEnv { name, .. } if is_verbatim_env(name) => {
+                verbatim_depth += 1;
+                out.push(tokens[i].clone());
+                i += 1;
+            }
+            Token::EndEnv { name, .. } if is_verbatim_env(name) => {
+                verbatim_depth = verbatim_depth.saturating_sub(1);
+                out.push(tokens[i].clone());
+                i += 1;
+            }
+            Token::Command { name, line }
+                if verbatim_depth == 0 && (name == "input" || name == "include") =>
+            {
                 let line = *line;
                 let cmd = name.clone();
                 match read_brace_arg(&tokens, i + 1) {
@@ -127,6 +140,13 @@ fn read_brace_arg(tokens: &[Token], start: usize) -> Option<(String, usize)> {
         i += 1;
     }
     None
+}
+
+fn is_verbatim_env(name: &str) -> bool {
+    matches!(
+        name,
+        "verbatim" | "verbatim*" | "Verbatim" | "lstlisting" | "minted"
+    )
 }
 
 /// Resolves the `\input` argument against the file map. Strips leading `./`
@@ -273,5 +293,79 @@ mod tests {
             warnings.iter().any(|w| w.message.contains("Circular")),
             "expected a Circular warning, got: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn flatten_skips_inside_verbatim_env() {
+        let main = "\\begin{verbatim}\\input{ghost}\\end{verbatim}";
+        let files = HashMap::new(); // ghost is not in the map
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        // No warning: the \input wasn't even considered (inside verbatim).
+        assert!(
+            warnings.is_empty(),
+            "should not warn for \\input inside verbatim; got {warnings:?}"
+        );
+        // The \input command must still be present in the output stream.
+        let has_input_cmd = flat
+            .iter()
+            .any(|t| matches!(t, Token::Command { name, .. } if name == "input"));
+        assert!(
+            has_input_cmd,
+            "\\input inside verbatim must be preserved literally"
+        );
+    }
+
+    #[test]
+    fn flatten_include_behaves_like_input() {
+        let main = "\\include{intro}";
+        let mut files = HashMap::new();
+        files.insert("intro".to_string(), "INC".to_string());
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        assert!(warnings.is_empty());
+        assert!(text_concat(&flat).contains("INC"));
+    }
+
+    #[test]
+    fn flatten_missing_file_emits_warning() {
+        let main = "alpha \\input{ghost} omega";
+        let files = HashMap::new();
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("ghost"));
+        assert!(warnings[0].message.contains("file not found"));
+        // \input directive and its arg should be dropped — surrounding text remains.
+        let concat = text_concat(&flat);
+        assert!(concat.contains("alpha"));
+        assert!(concat.contains("omega"));
+        assert!(!concat.contains("ghost"));
+    }
+
+    #[test]
+    fn flatten_no_brace_argument_keeps_command() {
+        // Malformed: \input with no following brace at all.
+        let main = "\\input";
+        let files = HashMap::new();
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        let has_input_cmd = flat
+            .iter()
+            .any(|t| matches!(t, Token::Command { name, .. } if name == "input"));
+        assert!(has_input_cmd);
+        assert!(warnings.is_empty());
     }
 }
