@@ -70,6 +70,23 @@ fn js_map_to_resources(map: &js_sys::Map) -> HashMap<String, ResourceData> {
     resources
 }
 
+/// Convert a JS `Map<string, Uint8Array>` to a Rust `HashMap<String, String>`,
+/// decoding each entry as UTF-8. Entries that fail to decode are skipped
+/// (the include referencing them will then warn "file not found").
+fn js_map_to_text_files(map: &js_sys::Map) -> HashMap<String, String> {
+    let mut files = HashMap::new();
+    map.for_each(&mut |value, key| {
+        if let Some(name) = key.as_string() {
+            let arr = js_sys::Uint8Array::from(value);
+            let bytes = arr.to_vec();
+            if let Ok(text) = String::from_utf8(bytes) {
+                files.insert(name, text);
+            }
+        }
+    });
+    files
+}
+
 /// Convert a document from one format to another (fragment mode).
 ///
 /// # Arguments
@@ -182,6 +199,68 @@ pub fn convert_bytes_to_bytes(
         .write_bytes(&doc, &opts)
         .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(js_sys::Uint8Array::from(&bytes[..]))
+}
+
+/// Convert a LaTeX document with `\input{}` / `\include{}` resolved against
+/// the supplied file map. Currently only meaningful for `from = "latex"`;
+/// for other formats, `files` is ignored (use `convertWithResources` instead).
+///
+/// # Arguments
+/// - `input` — main `.tex` source as a string
+/// - `from` — input format name (typically `"latex"`)
+/// - `to` — output format name (e.g. `"markdown"`)
+/// - `files` — `Map<string, Uint8Array>` of included files (UTF-8). Keys are
+///   filenames as referenced by `\input{X}` (with or without `.tex`).
+/// - `resources` — `Map<string, Uint8Array>` of binary resources for the writer
+///   (images embedded in HTML/DOCX/etc.). Pass an empty Map if not needed.
+/// - `standalone` — produce a complete output document (HTML head, LaTeX
+///   preamble, etc.)
+#[wasm_bindgen(js_name = "convertWithFiles")]
+pub fn convert_with_files(
+    input: &str,
+    from: &str,
+    to: &str,
+    files: &js_sys::Map,
+    resources: &js_sys::Map,
+    standalone: bool,
+) -> Result<String, JsError> {
+    let reg = build_registry();
+    let writer = reg
+        .find_writer(to)
+        .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
+
+    let mut doc = if from == "latex" || from == "tex" {
+        let text_files = js_map_to_text_files(files);
+        docmux_reader_latex::LatexReader::new()
+            .read_with_files(input, &text_files)
+            .map_err(|e| JsError::new(&e.to_string()))?
+    } else {
+        let reader = reg
+            .find_reader(from)
+            .ok_or_else(|| JsError::new(&format!("unsupported input format: {from}")))?;
+        reader
+            .read(input)
+            .map_err(|e| JsError::new(&e.to_string()))?
+    };
+
+    doc.resources = js_map_to_resources(resources);
+
+    let ctx = docmux_core::TransformContext::default();
+    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
+    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+
+    let opts = WriteOptions {
+        standalone,
+        highlight_style: if to == "html" {
+            Some("InspiredGitHub".into())
+        } else {
+            None
+        },
+        ..Default::default()
+    };
+    writer
+        .write(&doc, &opts)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<String, JsError> {
