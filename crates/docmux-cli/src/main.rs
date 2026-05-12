@@ -316,9 +316,11 @@ fn main() {
 
         if is_latex && single_disk_path {
             let main_path = &cli.input[0];
-            let base_dir = main_path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."));
+            // `paper.tex` → parent() returns Some(""), so treat empty as ".".
+            let base_dir = match main_path.parent() {
+                Some(p) if !p.as_os_str().is_empty() => p,
+                _ => std::path::Path::new("."),
+            };
             let files = load_latex_includes_from_disk(&combined_input, base_dir);
             match docmux_reader_latex::LatexReader::new().read_with_files(&combined_input, &files) {
                 Ok(d) => d,
@@ -939,19 +941,21 @@ fn load_latex_includes_from_disk(
     let mut queue: Vec<String> = scan_latex_includes(source);
 
     while let Some(arg) = queue.pop() {
-        if files.contains_key(&arg) {
+        // Canonicalize: strip leading "./" so \input{intro} and \input{./intro}
+        // share a single entry. This mirrors the reader's resolve_target.
+        let key = arg.trim_start_matches("./").to_string();
+        if files.contains_key(&key) {
             continue;
         }
-        let cleaned = arg.trim_start_matches("./");
         let candidates = [
-            base_dir.join(cleaned),
-            base_dir.join(format!("{cleaned}.tex")),
-            base_dir.join(format!("{cleaned}.ltx")),
+            base_dir.join(&key),
+            base_dir.join(format!("{key}.tex")),
+            base_dir.join(format!("{key}.ltx")),
         ];
         for cand in &candidates {
             if let Ok(content) = std::fs::read_to_string(cand) {
                 queue.extend(scan_latex_includes(&content));
-                files.insert(arg.clone(), content);
+                files.insert(key.clone(), content);
                 break;
             }
         }
@@ -1025,5 +1029,23 @@ mod tests {
     fn scan_latex_includes_ignores_commands_with_no_brace() {
         let src = "\\input no-brace-here";
         assert!(scan_latex_includes(src).is_empty());
+    }
+
+    #[test]
+    fn load_latex_includes_canonicalizes_dot_slash() {
+        let tmp = std::env::temp_dir().join("docmux-canon-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("mkdir tmp");
+        std::fs::write(tmp.join("intro.tex"), "CANON").expect("write intro");
+
+        // Same target referenced two ways — should produce one map entry.
+        let source = r"\input{intro} \input{./intro}";
+        let files = load_latex_includes_from_disk(source, &tmp);
+
+        assert_eq!(files.len(), 1, "got {files:?}");
+        assert!(files.contains_key("intro"));
+        assert!(!files.contains_key("./intro"), "non-canonical key leaked");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
