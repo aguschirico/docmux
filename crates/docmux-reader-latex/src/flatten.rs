@@ -58,42 +58,11 @@ fn flatten_inner(
             {
                 let line = *line;
                 let cmd = name.clone();
-                match read_brace_arg(&tokens, i + 1) {
-                    Some((arg, consumed)) => {
-                        i += 1 + consumed;
-                        match resolve_target(&arg, files) {
-                            Some((key, content)) => {
-                                if visited.iter().any(|v| v == &key) {
-                                    warnings.push(ParseWarning {
-                                        line,
-                                        message: format!(
-                                            "Circular \\{cmd}{{{arg}}} (already including {key})"
-                                        ),
-                                    });
-                                } else {
-                                    let sub = lexer::tokenize(content);
-                                    visited.push(key);
-                                    let mut flat =
-                                        flatten_inner(sub, files, warnings, visited, depth + 1);
-                                    visited.pop();
-                                    out.append(&mut flat);
-                                }
-                            }
-                            None => {
-                                warnings.push(ParseWarning {
-                                    line,
-                                    message: format!(
-                                        "\\{cmd}{{{arg}}}: file not found in file map"
-                                    ),
-                                });
-                            }
-                        }
-                    }
-                    None => {
-                        out.push(tokens[i].clone());
-                        i += 1;
-                    }
-                }
+                let (mut spliced, consumed) = expand_include_directive(
+                    &tokens, i, &cmd, line, files, warnings, visited, depth,
+                );
+                out.append(&mut spliced);
+                i += consumed;
             }
             _ => {
                 out.push(tokens[i].clone());
@@ -102,6 +71,46 @@ fn flatten_inner(
         }
     }
     out
+}
+
+/// Handles a `\input{...}` or `\include{...}` token at `tokens[cmd_idx]`.
+/// Returns the tokens to splice into the output (possibly empty) and the
+/// number of tokens consumed in `tokens` starting at `cmd_idx` (>= 1).
+#[allow(clippy::too_many_arguments)]
+fn expand_include_directive(
+    tokens: &[Token],
+    cmd_idx: usize,
+    cmd: &str,
+    line: usize,
+    files: &HashMap<String, String>,
+    warnings: &mut Vec<ParseWarning>,
+    visited: &mut Vec<String>,
+    depth: usize,
+) -> (Vec<Token>, usize) {
+    let Some((arg, brace_consumed)) = read_brace_arg(tokens, cmd_idx + 1) else {
+        // Malformed: no brace argument — leave the command alone for the parser.
+        return (vec![tokens[cmd_idx].clone()], 1);
+    };
+    let consumed = 1 + brace_consumed;
+    let Some((key, content)) = resolve_target(&arg, files) else {
+        warnings.push(ParseWarning {
+            line,
+            message: format!("\\{cmd}{{{arg}}}: file not found in file map"),
+        });
+        return (Vec::new(), consumed);
+    };
+    if visited.iter().any(|v| v == &key) {
+        warnings.push(ParseWarning {
+            line,
+            message: format!("Circular \\{cmd}{{{arg}}} (already including {key})"),
+        });
+        return (Vec::new(), consumed);
+    }
+    let sub = lexer::tokenize(content);
+    visited.push(key);
+    let flat = flatten_inner(sub, files, warnings, visited, depth + 1);
+    visited.pop();
+    (flat, consumed)
 }
 
 /// Reads a `{...}` brace argument starting at `tokens[start]`. Skips leading
