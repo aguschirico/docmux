@@ -68,6 +68,38 @@ await init();
 const html = convert("# Hello", "markdown", "html");
 ```
 
+### Multi-file LaTeX (`\input` / `\include`)
+
+For LaTeX papers that split their body across multiple files, pass a `files`
+map alongside the main source:
+
+```js
+import init, { convertWithFiles } from '@docmux/wasm/web';
+await init();
+
+const files = new Map([
+  ['intro.tex', new TextEncoder().encode(introSource)],
+  ['body.tex', new TextEncoder().encode(bodySource)],
+]);
+
+const md = convertWithFiles(
+  mainTex,
+  'latex',
+  'markdown',
+  files,
+  new Map(), // resources (images) — empty if none
+  false,     // standalone
+);
+```
+
+`\input{intro}` resolves against `intro.tex` (the `.tex` extension is added
+automatically if the bare key is missing). The CLI does the same thing
+automatically when you point it at a single `.tex` file on disk:
+
+```sh
+docmux paper/main.tex --to markdown
+```
+
 See the [@docmux/wasm README](npm/README.md) for full API documentation.
 
 ### Rust library
