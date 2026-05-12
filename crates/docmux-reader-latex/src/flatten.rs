@@ -1,11 +1,6 @@
 //! Token-stream pre-pass that resolves `\input{X}` and `\include{X}` against
 //! an in-memory file map. Runs between the lexer and the parser so the parser
 //! sees a single flat token stream with includes already inlined.
-//!
-//! Bootstrapped in Task 1 of issue #4 — the public entry point will be wired
-//! into `LatexReader::read_with_files` in a later task, so dead-code lints are
-//! suppressed at the module level until then.
-#![allow(dead_code)]
 
 use docmux_ast::ParseWarning;
 use std::collections::HashMap;
@@ -28,9 +23,6 @@ pub(crate) fn flatten_includes(
     flatten_inner(tokens, files, warnings, &mut visited, 0)
 }
 
-// `depth` is wired through but not yet read — the actual depth guard is added
-// in Task 5. Until then, silence the lint just for that parameter.
-#[allow(clippy::only_used_in_recursion)]
 fn flatten_inner(
     tokens: Vec<Token>,
     files: &HashMap<String, String>,
@@ -38,6 +30,13 @@ fn flatten_inner(
     visited: &mut Vec<String>,
     depth: usize,
 ) -> Vec<Token> {
+    if depth > MAX_DEPTH {
+        warnings.push(ParseWarning {
+            line: 0,
+            message: format!("max include depth ({MAX_DEPTH}) exceeded; aborting branch"),
+        });
+        return Vec::new();
+    }
     let mut out = Vec::with_capacity(tokens.len());
     let mut verbatim_depth: u32 = 0;
     let mut i = 0;
@@ -376,5 +375,36 @@ mod tests {
             .any(|t| matches!(t, Token::Command { name, .. } if name == "input"));
         assert!(has_input_cmd);
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn flatten_max_depth_guard_emits_warning() {
+        // Build a chain f0 -> f1 -> ... -> f40 with unique names so cycle
+        // detection doesn't short-circuit. Without a depth guard this would
+        // overflow the stack.
+        let mut files = HashMap::new();
+        for n in 0..40 {
+            let next = n + 1;
+            files.insert(format!("f{n}"), format!("level{n} \\input{{f{next}}}"));
+        }
+        files.insert("f40".to_string(), "deepest".to_string());
+
+        let main = "\\input{f0}";
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("max include depth")),
+            "expected a depth warning, got: {warnings:?}"
+        );
+        // The chain should have stopped before reaching f40.
+        let concat = text_concat(&flat);
+        assert!(
+            !concat.contains("deepest"),
+            "unexpected deep content: {concat:?}"
+        );
     }
 }
