@@ -310,11 +310,30 @@ fn main() {
             }
         }
 
-        match reader.read(&combined_input) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("docmux: parse error: {e}");
-                std::process::exit(1);
+        let is_latex = matches!(from, "latex" | "tex");
+        let single_disk_path =
+            cli.input.len() == 1 && cli.input.iter().all(|p| p.to_str() != Some("-"));
+
+        if is_latex && single_disk_path {
+            let main_path = &cli.input[0];
+            let base_dir = main_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let files = load_latex_includes_from_disk(&combined_input, base_dir);
+            match docmux_reader_latex::LatexReader::new().read_with_files(&combined_input, &files) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("docmux: parse error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            match reader.read(&combined_input) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("docmux: parse error: {e}");
+                    std::process::exit(1);
+                }
             }
         }
     };
@@ -885,6 +904,61 @@ fn detect_mime_cli(data: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// Scan a LaTeX source string for `\input{X}` and `\include{X}` references.
+/// Returns the raw filename arguments as written in the source, in
+/// occurrence order (duplicates preserved — the caller dedups via HashMap).
+fn scan_latex_includes(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for cmd in ["\\input", "\\include"] {
+        let mut search_start = 0;
+        while let Some(found) = source[search_start..].find(cmd) {
+            let abs = search_start + found;
+            let after = abs + cmd.len();
+            let rest = source[after..].trim_start();
+            if let Some(stripped) = rest.strip_prefix('{') {
+                if let Some(close) = stripped.find('}') {
+                    out.push(stripped[..close].trim().to_string());
+                }
+            }
+            search_start = after;
+        }
+    }
+    out
+}
+
+/// Recursively load every file referenced by `\input` / `\include` starting
+/// from `source`, resolving paths against `base_dir`. Returns a map keyed by
+/// the raw argument as written in the directive (e.g. `"intro"`,
+/// `"sec/0_abs"`). Missing files are silently skipped — the reader's
+/// flatten pass will warn for them.
+fn load_latex_includes_from_disk(
+    source: &str,
+    base_dir: &std::path::Path,
+) -> HashMap<String, String> {
+    let mut files: HashMap<String, String> = HashMap::new();
+    let mut queue: Vec<String> = scan_latex_includes(source);
+
+    while let Some(arg) = queue.pop() {
+        if files.contains_key(&arg) {
+            continue;
+        }
+        let cleaned = arg.trim_start_matches("./");
+        let candidates = [
+            base_dir.join(cleaned),
+            base_dir.join(format!("{cleaned}.tex")),
+            base_dir.join(format!("{cleaned}.ltx")),
+        ];
+        for cand in &candidates {
+            if let Ok(content) = std::fs::read_to_string(cand) {
+                queue.extend(scan_latex_includes(&content));
+                files.insert(arg.clone(), content);
+                break;
+            }
+        }
+    }
+    files
+}
+
 /// Apply `-M KEY=VAL` overrides to document metadata.
 fn apply_metadata_overrides(metadata: &mut Metadata, overrides: &[String]) {
     for kv in overrides {
@@ -926,5 +1000,30 @@ fn shift_headings(blocks: &mut [Block], shift: i8) {
             Block::FootnoteDef { content, .. } => shift_headings(content, shift),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_latex_includes_finds_input_and_include() {
+        let src = r#"\documentclass{article}
+\begin{document}
+\input{intro}
+\input{./sec/body}
+\include{appendix}
+\end{document}"#;
+        let refs = scan_latex_includes(src);
+        assert!(refs.contains(&"intro".to_string()), "got {refs:?}");
+        assert!(refs.contains(&"./sec/body".to_string()), "got {refs:?}");
+        assert!(refs.contains(&"appendix".to_string()), "got {refs:?}");
+    }
+
+    #[test]
+    fn scan_latex_includes_ignores_commands_with_no_brace() {
+        let src = "\\input no-brace-here";
+        assert!(scan_latex_includes(src).is_empty());
     }
 }
