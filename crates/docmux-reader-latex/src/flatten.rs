@@ -46,8 +46,8 @@ fn flatten_inner(
                 match read_brace_arg(&tokens, i + 1) {
                     Some((arg, consumed)) => {
                         i += 1 + consumed;
-                        match files.get(&arg) {
-                            Some(content) => {
+                        match resolve_target(&arg, files) {
+                            Some((_key, content)) => {
                                 let sub = lexer::tokenize(content);
                                 let mut flat =
                                     flatten_inner(sub, files, warnings, visited, depth + 1);
@@ -116,6 +116,22 @@ fn read_brace_arg(tokens: &[Token], start: usize) -> Option<(String, usize)> {
     None
 }
 
+/// Resolves the `\input` argument against the file map. Strips leading `./`
+/// and tries the bare key, then `<key>.tex`, then `<key>.ltx`.
+fn resolve_target<'a>(arg: &str, files: &'a HashMap<String, String>) -> Option<(String, &'a str)> {
+    let cleaned = arg.trim_start_matches("./");
+    for candidate in [
+        cleaned.to_string(),
+        format!("{cleaned}.tex"),
+        format!("{cleaned}.ltx"),
+    ] {
+        if let Some(content) = files.get(&candidate) {
+            return Some((candidate, content.as_str()));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +177,48 @@ mod tests {
         assert!(!has_input_cmd, "\\input command should be removed");
         // Defensive: there must be at least one Text token now.
         assert!(count_text_blocks(&flat) >= 1);
+    }
+
+    #[test]
+    fn flatten_resolves_with_tex_extension() {
+        let main = "\\input{intro}";
+        let mut files = HashMap::new();
+        // Note: only the .tex-suffixed key exists.
+        files.insert("intro.tex".to_string(), "hello".to_string());
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert!(text_concat(&flat).contains("hello"));
+    }
+
+    #[test]
+    fn flatten_accepts_explicit_extension() {
+        let main = "\\input{intro.tex}";
+        let mut files = HashMap::new();
+        files.insert("intro.tex".to_string(), "hello".to_string());
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        assert!(warnings.is_empty());
+        assert!(text_concat(&flat).contains("hello"));
+    }
+
+    #[test]
+    fn flatten_strips_leading_dot_slash() {
+        let main = "\\input{./sec/intro}";
+        let mut files = HashMap::new();
+        files.insert("sec/intro.tex".to_string(), "deep".to_string());
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert!(text_concat(&flat).contains("deep"));
     }
 }
