@@ -28,6 +28,8 @@ pub(crate) fn flatten_includes(
     flatten_inner(tokens, files, warnings, &mut visited, 0)
 }
 
+// `depth` is wired through but not yet read — the actual depth guard is added
+// in Task 5. Until then, silence the lint just for that parameter.
 #[allow(clippy::only_used_in_recursion)]
 fn flatten_inner(
     tokens: Vec<Token>,
@@ -47,11 +49,22 @@ fn flatten_inner(
                     Some((arg, consumed)) => {
                         i += 1 + consumed;
                         match resolve_target(&arg, files) {
-                            Some((_key, content)) => {
-                                let sub = lexer::tokenize(content);
-                                let mut flat =
-                                    flatten_inner(sub, files, warnings, visited, depth + 1);
-                                out.append(&mut flat);
+                            Some((key, content)) => {
+                                if visited.iter().any(|v| v == &key) {
+                                    warnings.push(ParseWarning {
+                                        line,
+                                        message: format!(
+                                            "Circular \\{cmd}{{{arg}}} (already including {key})"
+                                        ),
+                                    });
+                                } else {
+                                    let sub = lexer::tokenize(content);
+                                    visited.push(key);
+                                    let mut flat =
+                                        flatten_inner(sub, files, warnings, visited, depth + 1);
+                                    visited.pop();
+                                    out.append(&mut flat);
+                                }
                             }
                             None => {
                                 warnings.push(ParseWarning {
@@ -220,5 +233,45 @@ mod tests {
 
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert!(text_concat(&flat).contains("deep"));
+    }
+
+    #[test]
+    fn flatten_recurses_through_nested_includes() {
+        let main = "\\input{intro}";
+        let mut files = HashMap::new();
+        files.insert("intro".to_string(), "A \\input{deeper} Z".to_string());
+        files.insert("deeper".to_string(), "MIDDLE".to_string());
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        let concat = text_concat(&flat);
+        assert!(
+            concat.contains("MIDDLE"),
+            "expected nested content; got {concat:?}"
+        );
+    }
+
+    #[test]
+    fn flatten_detects_cycles_and_warns() {
+        let main = "\\input{a}";
+        let mut files = HashMap::new();
+        files.insert("a".to_string(), "from-a \\input{b}".to_string());
+        files.insert("b".to_string(), "from-b \\input{a}".to_string());
+
+        let tokens = lexer::tokenize(main);
+        let mut warnings = Vec::new();
+        let flat = flatten_includes(tokens, &files, &mut warnings);
+
+        // Both bodies should appear once. The cycle should be cut, not infinite.
+        let concat = text_concat(&flat);
+        assert!(concat.contains("from-a"));
+        assert!(concat.contains("from-b"));
+        assert!(
+            warnings.iter().any(|w| w.message.contains("Circular")),
+            "expected a Circular warning, got: {warnings:?}"
+        );
     }
 }
