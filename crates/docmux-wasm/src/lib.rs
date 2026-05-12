@@ -70,21 +70,30 @@ fn js_map_to_resources(map: &js_sys::Map) -> HashMap<String, ResourceData> {
     resources
 }
 
+/// Decode a map of byte vectors as UTF-8 strings. Entries that fail to decode
+/// are silently dropped; the caller may surface a downstream warning.
+///
+/// This is the pure-Rust core that's straightforward to unit-test; the
+/// `js_sys::Map` adapter below delegates here.
+fn decode_text_files(bytes_map: HashMap<String, Vec<u8>>) -> HashMap<String, String> {
+    bytes_map
+        .into_iter()
+        .filter_map(|(name, bytes)| String::from_utf8(bytes).ok().map(|s| (name, s)))
+        .collect()
+}
+
 /// Convert a JS `Map<string, Uint8Array>` to a Rust `HashMap<String, String>`,
 /// decoding each entry as UTF-8. Entries that fail to decode are skipped
 /// (the include referencing them will then warn "file not found").
 fn js_map_to_text_files(map: &js_sys::Map) -> HashMap<String, String> {
-    let mut files = HashMap::new();
+    let mut bytes_map = HashMap::new();
     map.for_each(&mut |value, key| {
         if let Some(name) = key.as_string() {
             let arr = js_sys::Uint8Array::from(value);
-            let bytes = arr.to_vec();
-            if let Ok(text) = String::from_utf8(bytes) {
-                files.insert(name, text);
-            }
+            bytes_map.insert(name, arr.to_vec());
         }
     });
-    files
+    decode_text_files(bytes_map)
 }
 
 /// Convert a document from one format to another (fragment mode).
@@ -210,7 +219,11 @@ pub fn convert_bytes_to_bytes(
 /// - `from` — input format name (typically `"latex"`)
 /// - `to` — output format name (e.g. `"markdown"`)
 /// - `files` — `Map<string, Uint8Array>` of included files (UTF-8). Keys are
-///   filenames as referenced by `\input{X}` (with or without `.tex`).
+///   filenames as referenced by `\input{X}` (with or without `.tex`). Entries
+///   whose bytes are not valid UTF-8 are skipped; the corresponding `\input`
+///   will surface as a "file not found" warning in `doc.warnings`. Only
+///   meaningful for `from = "latex"` or `from = "tex"`; passing a non-empty
+///   map with any other format returns an error.
 /// - `resources` — `Map<string, Uint8Array>` of binary resources for the writer
 ///   (images embedded in HTML/DOCX/etc.). Pass an empty Map if not needed.
 /// - `standalone` — produce a complete output document (HTML head, LaTeX
@@ -225,11 +238,18 @@ pub fn convert_with_files(
     standalone: bool,
 ) -> Result<String, JsError> {
     let reg = build_registry();
+    let is_latex = from == "latex" || from == "tex";
+    if !is_latex && files.size() > 0 {
+        return Err(JsError::new(
+            "convertWithFiles: `files` is only supported when `from` is 'latex' or 'tex'. \
+             For embedding binary resources, use `convertWithResources` instead.",
+        ));
+    }
     let writer = reg
         .find_writer(to)
         .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
 
-    let mut doc = if from == "latex" || from == "tex" {
+    let mut doc = if is_latex {
         let text_files = js_map_to_text_files(files);
         docmux_reader_latex::LatexReader::new()
             .read_with_files(input, &text_files)
@@ -394,4 +414,44 @@ pub fn parse_bytes_to_json(input: &[u8], from: &str) -> Result<String, JsError> 
         .read_bytes(input)
         .map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string_pretty(&doc).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_text_files_keeps_utf8_entries() {
+        let mut input = HashMap::new();
+        input.insert("intro.tex".to_string(), b"hello".to_vec());
+        input.insert("body.tex".to_string(), "café".as_bytes().to_vec());
+
+        let out = decode_text_files(input);
+
+        assert_eq!(out.get("intro.tex").map(String::as_str), Some("hello"));
+        assert_eq!(out.get("body.tex").map(String::as_str), Some("café"));
+    }
+
+    #[test]
+    fn decode_text_files_drops_invalid_utf8() {
+        let mut input = HashMap::new();
+        input.insert("good.tex".to_string(), b"ok".to_vec());
+        // 0xFF is never a valid lead byte in UTF-8.
+        input.insert("bad.bin".to_string(), vec![0xFF, 0xFE, 0xFD]);
+
+        let out = decode_text_files(input);
+
+        assert_eq!(out.get("good.tex").map(String::as_str), Some("ok"));
+        assert!(
+            !out.contains_key("bad.bin"),
+            "non-UTF-8 entry must be skipped"
+        );
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn decode_text_files_empty_input_returns_empty() {
+        let out = decode_text_files(HashMap::new());
+        assert!(out.is_empty());
+    }
 }
