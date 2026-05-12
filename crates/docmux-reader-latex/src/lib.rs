@@ -6,6 +6,7 @@
 //! Unrecognized commands and environments are emitted as `RawBlock`/`RawInline`
 //! with warnings accumulated in `Document.warnings`.
 
+pub(crate) mod flatten;
 pub(crate) mod lexer;
 pub(crate) mod parser;
 pub(crate) mod unescape;
