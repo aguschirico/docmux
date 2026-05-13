@@ -225,6 +225,66 @@ export function convertToBytes(input, from, to, resources) {
 }
 
 /**
+ * Convert a LaTeX document with `\input{}` / `\include{}` resolved against
+ * the supplied file map. Currently only meaningful for `from = "latex"`;
+ * for other formats, `files` is ignored (use `convertWithResources` instead).
+ *
+ * # Arguments
+ * - `input` — main `.tex` source as a string
+ * - `from` — input format name (typically `"latex"`)
+ * - `to` — output format name (e.g. `"markdown"`)
+ * - `files` — `Map<string, Uint8Array>` of included files (UTF-8). Keys are
+ *   filenames as referenced by `\input{X}` (with or without `.tex`). Entries
+ *   whose bytes are not valid UTF-8 are skipped; the corresponding `\input`
+ *   will surface as a "file not found" warning in `doc.warnings`. Only
+ *   meaningful for `from = "latex"` or `from = "tex"`; passing a non-empty
+ *   map with any other format returns an error.
+ * - `resources` — `Map<string, Uint8Array>` of binary resources for the writer
+ *   (images embedded in HTML/DOCX/etc.). Pass an empty Map if not needed.
+ * - `standalone` — produce a complete output document (HTML head, LaTeX
+ *   preamble, etc.)
+ * @param {string} input
+ * @param {string} from
+ * @param {string} to
+ * @param {Map<any, any>} files
+ * @param {Map<any, any>} resources
+ * @param {boolean} standalone
+ * @returns {string}
+ */
+export function convertWithFiles(input, from, to, files, resources, standalone) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(from, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(to, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.convertWithFiles(retptr, ptr0, len0, ptr1, len1, ptr2, len2, addBorrowedObject(files), addBorrowedObject(resources), standalone);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        var ptr4 = r0;
+        var len4 = r1;
+        if (r3) {
+            ptr4 = 0; len4 = 0;
+            throw takeObject(r2);
+        }
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        heap[stack_pointer++] = undefined;
+        heap[stack_pointer++] = undefined;
+        wasm.__wbindgen_export3(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
  * Convert text input to string output, with image resources for embedding.
  * @param {string} input
  * @param {string} from
@@ -426,7 +486,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_312(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_342(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -447,6 +507,10 @@ function __wbg_get_imports() {
         __wbg_prototypesetcall_a6b02eb00b0f4ce2: function(arg0, arg1, arg2) {
             Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), getObject(arg2));
         },
+        __wbg_size_cec5cae0e9d95a0b: function(arg0) {
+            const ret = getObject(arg0).size;
+            return ret;
+        },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
@@ -462,8 +526,8 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_312(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_312(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_342(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_342(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function addHeapObject(obj) {

@@ -42,6 +42,28 @@ export function convertStandalone(input: string, from: string, to: string): stri
 export function convertToBytes(input: string, from: string, to: string, resources: Map<any, any>): Uint8Array;
 
 /**
+ * Convert a LaTeX document with `\input{}` / `\include{}` resolved against
+ * the supplied file map. Currently only meaningful for `from = "latex"`;
+ * for other formats, `files` is ignored (use `convertWithResources` instead).
+ *
+ * # Arguments
+ * - `input` — main `.tex` source as a string
+ * - `from` — input format name (typically `"latex"`)
+ * - `to` — output format name (e.g. `"markdown"`)
+ * - `files` — `Map<string, Uint8Array>` of included files (UTF-8). Keys are
+ *   filenames as referenced by `\input{X}` (with or without `.tex`). Entries
+ *   whose bytes are not valid UTF-8 are skipped; the corresponding `\input`
+ *   will surface as a "file not found" warning in `doc.warnings`. Only
+ *   meaningful for `from = "latex"` or `from = "tex"`; passing a non-empty
+ *   map with any other format returns an error.
+ * - `resources` — `Map<string, Uint8Array>` of binary resources for the writer
+ *   (images embedded in HTML/DOCX/etc.). Pass an empty Map if not needed.
+ * - `standalone` — produce a complete output document (HTML head, LaTeX
+ *   preamble, etc.)
+ */
+export function convertWithFiles(input: string, from: string, to: string, files: Map<any, any>, resources: Map<any, any>, standalone: boolean): string;
+
+/**
  * Convert text input to string output, with image resources for embedding.
  */
 export function convertWithResources(input: string, from: string, to: string, resources: Map<any, any>): string;
@@ -81,13 +103,14 @@ export interface InitOutput {
     readonly convertBytesToBytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly convertStandalone: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly convertToBytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+    readonly convertWithFiles: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
     readonly convertWithResources: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly inputFormats: (a: number) => void;
     readonly markdownToHtml: (a: number, b: number, c: number) => void;
     readonly outputFormats: (a: number) => void;
     readonly parseBytesToJson: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly parseToJson: (a: number, b: number, c: number, d: number, e: number) => void;
-    readonly __wasm_bindgen_func_elem_312: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_342: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
