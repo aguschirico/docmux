@@ -1,6 +1,6 @@
 {
   "name": "@docmux/wasm",
-  "version": "0.4.7",
+  "version": "0.5.0",
   "description": "Universal document converter — WASM bindings for docmux",
   "license": "MIT",
   "type": "module",
