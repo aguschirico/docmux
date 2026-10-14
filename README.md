@@ -1,10 +1,18 @@
 # docmux
 
-Universal document converter — MIT licensed, WASM-first, written in Rust.
+Convert LaTeX, Markdown, Typst, Word, HTML and MyST in the browser, in Node or from the command line. MIT licensed, written in Rust and compiled to WebAssembly.
+
+**[Try it in the playground](https://docmux.pages.dev)**: a research paper is already loaded, and nothing leaves your browser.
+
+![The playground converting a LaTeX paper to HTML, Typst and Word, then a README and a Typst report](docs/assets/playground.gif)
 
 ## What is docmux?
 
-docmux converts between markup formats using a modular **Reader → AST → Writer** pipeline. Each format is a separate Rust crate, enabling tree-shaking in WASM builds. Think of it as a focused, MIT-licensed alternative to Pandoc, designed for embedding in web applications via WebAssembly.
+docmux converts between markup formats with a **Reader → AST → Writer** pipeline. Each format is a separate Rust crate, so a WASM build only carries what it uses. It covers a part of what Pandoc does, under the MIT license, and it is meant to be embedded in web applications.
+
+## Tested on real papers
+
+Unit tests pass long before real documents do, so docmux is also checked against the LaTeX sources of eight arXiv papers (VAE, Adam, ResNet, Transformer, BERT, GPT-3, DDPM, LoRA). The Typst output of all eight compiles with no errors and no leftover LaTeX commands, and their Word output has every equation as a native Word equation. The harness lives in [`scripts/corpus/`](scripts/corpus/); the sources are downloaded, not committed.
 
 ## Supported formats
 
@@ -16,7 +24,7 @@ docmux converts between markup formats using a modular **Reader → AST → Writ
 | Typst | ✅ | ✅ |
 | MyST Markdown | ✅ | ✅ |
 | DOCX | ✅ | ✅ |
-| Plaintext | — | ✅ |
+| Plaintext | ❌ | ✅ |
 
 ## Quick start
 
@@ -87,7 +95,7 @@ const md = convertWithFiles(
   'latex',
   'markdown',
   files,
-  new Map(), // resources (images) — empty if none
+  new Map(), // resources (images), empty if none
   false,     // standalone
 );
 ```
@@ -118,12 +126,15 @@ let html = writer.write(&doc, &WriteOptions::default())?;
 
 ## Features
 
-- **13+ block types, 16+ inline types** — math, citations, cross-references, admonitions, tables, footnotes
+- **13+ block types, 16+ inline types**: math, citations, cross-references, admonitions, tables, footnotes
+- **LaTeX as people write it**: user macros (`\newcommand`, `\def`, `\DeclareMathOperator`) are expanded, layout commands keep their text, and `\input` files are followed
+- **Citations from the `.bbl`** that arXiv ships: numeric, alphabetic or author-year, each linked to its reference
+- **Math across formats**: LaTeX to Typst math, MathML or KaTeX for HTML, and native Word equations (OMML) for DOCX
 - **Syntax highlighting** via syntect (HTML and LaTeX output)
-- **Template engine** — pandoc-compatible `$variable$` syntax with conditionals and loops
-- **Transforms** — table of contents, section numbering, cross-reference resolution, CSL citations, math notation conversion, section divs
-- **Image embedding** — real dimension parsing (PNG/JPEG), drag-and-drop in playground, resource-aware DOCX writer
-- **CLI parity** — `--standalone`, `--toc`, `--number-sections`, `--template`, `--bibliography`, `--csl`, `--math`, `--css`, `--wrap`, and more
+- **Template engine**: pandoc-compatible `$variable$` syntax with conditionals and loops
+- **Transforms**: table of contents, section numbering, cross-reference resolution, CSL citations, math notation conversion, section divs
+- **Image embedding**: real dimension parsing (PNG/JPEG), drag-and-drop in playground, resource-aware DOCX writer
+- **CLI parity**: `--standalone`, `--toc`, `--number-sections`, `--template`, `--bibliography`, `--csl`, `--math`, `--css`, `--wrap`, and more
 
 ## Architecture
 
@@ -164,8 +175,8 @@ cd playground && pnpm install && pnpm run dev
 
 ### Code style
 
-- No `unwrap()` in library code — use `?` and proper error types
-- No `any` in TypeScript — use interfaces, generics, discriminated unions
+- No `unwrap()` in library code: use `?` and proper error types
+- No `any` in TypeScript: use interfaces, generics, discriminated unions
 - New functionality must have tests
 - Run `cargo fmt` and `cargo clippy` before committing
 
@@ -178,4 +189,4 @@ cd playground && pnpm install && pnpm run dev
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
