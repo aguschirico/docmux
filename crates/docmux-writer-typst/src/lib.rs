@@ -56,13 +56,25 @@ impl TypstWriter {
                 out.push_str("\n\n");
             }
             Block::Heading {
-                level, id, content, ..
+                level,
+                id,
+                content,
+                attrs,
             } => {
-                for _ in 0..*level {
-                    out.push('=');
+                let unnumbered = attrs
+                    .as_ref()
+                    .is_some_and(|a| a.classes.iter().any(|c| c == "unnumbered"));
+                if unnumbered {
+                    out.push_str(&format!("#heading(level: {level}, numbering: none)["));
+                    self.write_inlines_impl(content, opts, out, ctx);
+                    out.push(']');
+                } else {
+                    for _ in 0..*level {
+                        out.push('=');
+                    }
+                    out.push(' ');
+                    self.write_inlines_impl(content, opts, out, ctx);
                 }
-                out.push(' ');
-                self.write_inlines_impl(content, opts, out, ctx);
                 if let Some(id) = id {
                     out.push_str(&format!(" <{}>", typst_label(id)));
                 }
@@ -219,9 +231,15 @@ impl TypstWriter {
                     }
                 }
             }
-            Block::Div { content, .. } => {
-                self.write_blocks_impl(content, opts, out, ctx);
-            }
+            Block::Div { attrs, content } => match &attrs.id {
+                // A labelled block, so in-document links can point at it.
+                Some(id) => {
+                    out.push_str("#block[\n");
+                    self.write_blocks_impl(content, opts, out, ctx);
+                    out.push_str(&format!("] <{}>\n\n", typst_label(id)));
+                }
+                None => self.write_blocks_impl(content, opts, out, ctx),
+            },
             Block::FootnoteDef { .. } => {
                 // Consumed by footnote pre-pass; skip
             }
@@ -254,6 +272,7 @@ impl TypstWriter {
                 // `@a-b` would read the `-b` as part of the label.
                 Inline::CrossRef(cr)
                     if ctx.labels.contains(&cr.target)
+                        && matches!(cr.form, RefForm::NumberWithType)
                         && inlines.get(k + 1).is_some_and(starts_label_char) =>
                 {
                     out.push_str(&format!("#ref(<{}>)", typst_label(&cr.target)));
@@ -303,6 +322,21 @@ impl TypstWriter {
                 out.push('$');
                 out.push_str(value);
                 out.push('$');
+            }
+            Inline::Link { url, content, .. } if url.trim().is_empty() => {
+                // Typst rejects an empty URL; keep the text.
+                self.write_inlines_impl(content, opts, out, ctx);
+            }
+            Inline::Link { url, content, .. } if url.starts_with('#') => {
+                // In-document link: a label, or plain text if nothing has it.
+                let target = &url[1..];
+                if ctx.labels.contains(target) {
+                    out.push_str(&format!("#link(<{}>)[", typst_label(target)));
+                    self.write_inlines_impl(content, opts, out, ctx);
+                    out.push(']');
+                } else {
+                    self.write_inlines_impl(content, opts, out, ctx);
+                }
             }
             Inline::Link { url, content, .. } => {
                 out.push_str(&format!("#link(\"{}\")", escape_typst_url(url)));
@@ -371,12 +405,25 @@ impl TypstWriter {
                 }
             }
             Inline::CrossRef(cr) => {
-                if ctx.labels.contains(&cr.target) {
-                    out.push('@');
-                    out.push_str(&typst_label(&cr.target));
-                } else {
+                let label = typst_label(&cr.target);
+                if !ctx.labels.contains(&cr.target) {
                     // What LaTeX prints for an undefined reference.
                     out.push_str("??");
+                    return;
+                }
+                match &cr.form {
+                    // `Table~\ref{t}`: the source already names the kind.
+                    RefForm::Number | RefForm::Page => {
+                        out.push_str(&format!("#ref(<{label}>, supplement: none)"))
+                    }
+                    RefForm::Custom(text) => out.push_str(&format!(
+                        "#ref(<{label}>, supplement: [{}])",
+                        escape_typst(text)
+                    )),
+                    RefForm::NumberWithType => {
+                        out.push('@');
+                        out.push_str(&label);
+                    }
                 }
             }
             Inline::FootnoteRef { id } => {
@@ -639,9 +686,15 @@ fn collect_labels(blocks: &[Block], out: &mut Vec<(LabelKind, String)>) {
                     out.push((LabelKind::Other, label.clone()));
                 }
             }
-            Block::BlockQuote { content }
-            | Block::Div { content, .. }
-            | Block::Admonition { content, .. } => collect_labels(content, out),
+            Block::Div { attrs, content } => {
+                if let Some(id) = &attrs.id {
+                    out.push((LabelKind::Other, id.clone()));
+                }
+                collect_labels(content, out);
+            }
+            Block::BlockQuote { content } | Block::Admonition { content, .. } => {
+                collect_labels(content, out)
+            }
             Block::List { items, .. } => {
                 for item in items {
                     collect_labels(&item.content, out);
@@ -729,6 +782,19 @@ pub fn escape_typst(s: &str) -> String {
 /// the start of a line (`- `, `+ `, `= `, `/ `, `1. `).
 fn push_text(out: &mut String, value: &str) {
     let escaped = escape_typst(value);
+    if out.ends_with(']') || out.ends_with(')') {
+        // Right after an embedded expression (`#link(..)[..]`), `;` ends the
+        // expression, `(` and `[` continue the call, `.x` is a field access.
+        let mut chars = escaped.chars();
+        let continues = match (chars.next(), chars.next()) {
+            (Some(';' | '(' | '['), _) => true,
+            (Some('.'), Some(c)) => c.is_alphanumeric(),
+            _ => false,
+        };
+        if continues {
+            out.push('\\');
+        }
+    }
     if !(out.is_empty() || out.ends_with('\n')) {
         out.push_str(&escaped);
         return;
@@ -1190,7 +1256,7 @@ mod tests {
                 Block::Paragraph {
                     content: vec![Inline::CrossRef(CrossRef {
                         target: "figure:eval strategies".into(),
-                        form: RefForm::Number,
+                        form: RefForm::NumberWithType,
                     })],
                 },
             ],
@@ -1383,12 +1449,12 @@ mod tests {
                     content: vec![
                         Inline::CrossRef(CrossRef {
                             target: "sec:a".into(),
-                            form: RefForm::Number,
+                            form: RefForm::NumberWithType,
                         }),
                         Inline::text("-"),
                         Inline::CrossRef(CrossRef {
                             target: "sec:a".into(),
-                            form: RefForm::Number,
+                            form: RefForm::NumberWithType,
                         }),
                         Inline::text(" below."),
                     ],
@@ -1397,5 +1463,104 @@ mod tests {
             ..Default::default()
         };
         assert!(write_typst(&doc).contains("#ref(<sec:a>)-@sec:a below."));
+    }
+
+    #[test]
+    fn references_section_with_internal_links() {
+        let entry = Block::Div {
+            attrs: Attributes {
+                id: Some("ref-kingma".into()),
+                classes: vec!["csl-entry".into()],
+                key_values: HashMap::new(),
+            },
+            content: vec![Block::text("Kingma and Ba. Adam.")],
+        };
+        let doc = Document {
+            content: vec![
+                Block::Paragraph {
+                    content: vec![
+                        Inline::Link {
+                            url: "#ref-kingma".into(),
+                            title: None,
+                            content: vec![Inline::text("[1]")],
+                            attrs: None,
+                        },
+                        Inline::text(" "),
+                        Inline::Link {
+                            url: "#nowhere".into(),
+                            title: None,
+                            content: vec![Inline::text("x")],
+                            attrs: None,
+                        },
+                    ],
+                },
+                Block::Heading {
+                    level: 1,
+                    id: Some("references".into()),
+                    content: vec![Inline::text("References")],
+                    attrs: Some(Attributes {
+                        id: None,
+                        classes: vec!["unnumbered".into()],
+                        key_values: HashMap::new(),
+                    }),
+                },
+                entry,
+            ],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("#link(<ref-kingma>)[\\[1\\]] x"));
+        assert!(typ.contains("#heading(level: 1, numbering: none)[References] <references>"));
+        assert!(typ.contains("#block[\nKingma and Ba. Adam.\n\n] <ref-kingma>"));
+    }
+
+    #[test]
+    fn text_after_embedded_expression_does_not_continue_it() {
+        let link = |t: &str| Inline::Link {
+            url: "https://a.org".into(),
+            title: None,
+            content: vec![Inline::text(t)],
+            attrs: None,
+        };
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    link("a"),
+                    Inline::text("; "),
+                    link("b"),
+                    Inline::text("(2018). Next"),
+                ],
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            write_typst(&doc).trim(),
+            "#link(\"https://a.org\")[a]\\; #link(\"https://a.org\")[b]\\(2018). Next"
+        );
+    }
+
+    #[test]
+    fn plain_reference_omits_the_kind() {
+        let doc = Document {
+            content: vec![
+                Block::Heading {
+                    level: 1,
+                    id: Some("sec:a".into()),
+                    content: vec![Inline::text("A")],
+                    attrs: None,
+                },
+                Block::Paragraph {
+                    content: vec![
+                        Inline::text("Section "),
+                        Inline::CrossRef(CrossRef {
+                            target: "sec:a".into(),
+                            form: RefForm::Number,
+                        }),
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).contains("Section #ref(<sec:a>, supplement: none)"));
     }
 }
