@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Part of docmux — universal document converter"
+description = "CSL citation formatting for docmux, built on hayagriva"
 rust-version.workspace = true
 
 [dependencies]

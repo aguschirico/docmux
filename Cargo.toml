@@ -35,36 +35,36 @@ version = "0.6.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/aguschirico/docmux"
-description = "Universal document converter — MIT licensed, WASM-first"
+description = "Universal document converter: MIT licensed, WASM-first"
 rust-version = "1.80"
 
 [workspace.dependencies]
 # Internal crates
-docmux-ast = { path = "crates/docmux-ast" }
-docmux-core = { path = "crates/docmux-core" }
-docmux-reader-markdown = { path = "crates/docmux-reader-markdown" }
-docmux-reader-myst = { path = "crates/docmux-reader-myst" }
-docmux-reader-typst = { path = "crates/docmux-reader-typst" }
-docmux-reader-html = { path = "crates/docmux-reader-html" }
-docmux-reader-docx = { path = "crates/docmux-reader-docx" }
-docmux-reader-latex = { path = "crates/docmux-reader-latex" }
-docmux-writer-html = { path = "crates/docmux-writer-html" }
-docmux-writer-latex = { path = "crates/docmux-writer-latex" }
-docmux-writer-typst = { path = "crates/docmux-writer-typst" }
-docmux-writer-markdown = { path = "crates/docmux-writer-markdown" }
-docmux-writer-myst = { path = "crates/docmux-writer-myst" }
-docmux-writer-plaintext = { path = "crates/docmux-writer-plaintext" }
-docmux-writer-docx = { path = "crates/docmux-writer-docx" }
-docmux-transform-math = { path = "crates/docmux-transform-math" }
-docmux-transform-cite = { path = "crates/docmux-transform-cite" }
-docmux-transform-crossref = { path = "crates/docmux-transform-crossref" }
-docmux-transform-references = { path = "crates/docmux-transform-references" }
-docmux-pipeline = { path = "crates/docmux-pipeline" }
-docmux-transform-toc = { path = "crates/docmux-transform-toc" }
-docmux-transform-number-sections = { path = "crates/docmux-transform-number-sections" }
-docmux-transform-section-divs = { path = "crates/docmux-transform-section-divs" }
-docmux-template = { path = "crates/docmux-template" }
-docmux-highlight = { path = "crates/docmux-highlight" }
+docmux-ast = { path = "crates/docmux-ast", version = "0.6.0" }
+docmux-core = { path = "crates/docmux-core", version = "0.6.0" }
+docmux-reader-markdown = { path = "crates/docmux-reader-markdown", version = "0.6.0" }
+docmux-reader-myst = { path = "crates/docmux-reader-myst", version = "0.6.0" }
+docmux-reader-typst = { path = "crates/docmux-reader-typst", version = "0.6.0" }
+docmux-reader-html = { path = "crates/docmux-reader-html", version = "0.6.0" }
+docmux-reader-docx = { path = "crates/docmux-reader-docx", version = "0.6.0" }
+docmux-reader-latex = { path = "crates/docmux-reader-latex", version = "0.6.0" }
+docmux-writer-html = { path = "crates/docmux-writer-html", version = "0.6.0" }
+docmux-writer-latex = { path = "crates/docmux-writer-latex", version = "0.6.0" }
+docmux-writer-typst = { path = "crates/docmux-writer-typst", version = "0.6.0" }
+docmux-writer-markdown = { path = "crates/docmux-writer-markdown", version = "0.6.0" }
+docmux-writer-myst = { path = "crates/docmux-writer-myst", version = "0.6.0" }
+docmux-writer-plaintext = { path = "crates/docmux-writer-plaintext", version = "0.6.0" }
+docmux-writer-docx = { path = "crates/docmux-writer-docx", version = "0.6.0" }
+docmux-transform-math = { path = "crates/docmux-transform-math", version = "0.6.0" }
+docmux-transform-cite = { path = "crates/docmux-transform-cite", version = "0.6.0" }
+docmux-transform-crossref = { path = "crates/docmux-transform-crossref", version = "0.6.0" }
+docmux-transform-references = { path = "crates/docmux-transform-references", version = "0.6.0" }
+docmux-pipeline = { path = "crates/docmux-pipeline", version = "0.6.0" }
+docmux-transform-toc = { path = "crates/docmux-transform-toc", version = "0.6.0" }
+docmux-transform-number-sections = { path = "crates/docmux-transform-number-sections", version = "0.6.0" }
+docmux-transform-section-divs = { path = "crates/docmux-transform-section-divs", version = "0.6.0" }
+docmux-template = { path = "crates/docmux-template", version = "0.6.0" }
+docmux-highlight = { path = "crates/docmux-highlight", version = "0.6.0" }
 
 # External dependencies
 thiserror = "2"

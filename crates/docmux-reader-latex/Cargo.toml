@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Part of docmux — universal document converter"
+description = "LaTeX reader for docmux, with macro expansion, multi-file projects and citations from .bbl files"
 rust-version.workspace = true
 
 [dependencies]

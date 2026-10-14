@@ -48,6 +48,8 @@ echo "==> Bumping version in Cargo.toml and npm/package.json"
 # Cargo.toml: replace `version = "X.Y.Z"` under [workspace.package]
 # Use a temp .bak file for macOS compatibility
 sed -i.bak 's/^version = "[0-9]*\.[0-9]*\.[0-9]*"$/version = "'"$VERSION"'"/' "$CARGO_TOML"
+# Internal dependencies carry the version too (crates.io requires it).
+sed -i.bak 's/\(path = "crates\/[^"]*", version = "\)[0-9]*\.[0-9]*\.[0-9]*"/\1'"$VERSION"'"/' "$CARGO_TOML"
 rm -f "$CARGO_TOML.bak"
 
 # npm/package.json: replace `"version": "X.Y.Z"`

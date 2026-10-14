@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "DOCX reader for docmux — parses DOCX into the docmux AST"
+description = "DOCX reader for docmux: parses Word documents into the docmux AST"
 rust-version.workspace = true
 
 [dependencies]

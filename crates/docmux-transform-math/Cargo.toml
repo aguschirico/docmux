@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Part of docmux — universal document converter"
+description = "Math notation conversion for docmux: LaTeX to Typst, MathML and Word (OMML), and Typst to LaTeX"
 rust-version.workspace = true
 
 [dependencies]

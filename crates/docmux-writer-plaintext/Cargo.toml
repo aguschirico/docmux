@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Plain text writer for docmux — stripped output"
+description = "Plain text writer for docmux"
 rust-version.workspace = true
 
 [dependencies]

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "CLI for docmux — universal document converter"
+description = "Command-line document converter for LaTeX, Markdown, Typst, Word, HTML and MyST"
 rust-version.workspace = true
 
 [[bin]]
