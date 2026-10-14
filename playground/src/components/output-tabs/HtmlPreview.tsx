@@ -16,6 +16,7 @@ body {
 }
 @media (max-width: 760px) {
   body { margin: 0; padding: 1.5rem 1.25rem 3rem; border-radius: 0; }
+  .abstract { margin: 0 0 2em; }
 }
 header h1.title, h1.title { text-align: center; border: none; font-size: 1.9em; margin-bottom: 0.2em; }
 p.author, p.date, .author, .date { text-align: center; color: #4b5563; margin: 0.2em 0; }

@@ -103,14 +103,14 @@ function Actions({ tab, state, baseName }: { tab: OutputTab; state: ConversionSt
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
       {!state.binaryOutput && (
-        <button className={button} onClick={copy} disabled={!text}>
+        <button className={button} onClick={copy} disabled={!text} title="Copy">
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? "Copied" : "Copy"}
+          <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
         </button>
       )}
-      <button className={button} onClick={save} disabled={!text && !state.binaryOutput}>
+      <button className={button} onClick={save} disabled={!text && !state.binaryOutput} title="Save">
         <Download className="h-3.5 w-3.5" />
-        Save
+        <span className="hidden sm:inline">Save</span>
       </button>
     </div>
   );

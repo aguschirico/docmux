@@ -96,10 +96,10 @@ function Fact({ icon, children }: { icon: React.ReactNode; children: string }) {
 
 export function Header() {
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-x-8 gap-y-3 border-b border-zinc-800/80 bg-gradient-to-b from-zinc-900/60 to-zinc-950 px-5 py-4">
+    <header className="flex shrink-0 flex-wrap items-center gap-x-8 gap-y-3 border-b border-zinc-800/80 bg-gradient-to-b from-zinc-900/60 to-zinc-950 px-4 py-3 md:px-5 md:py-4">
       <Logo />
-      <div className="min-w-0 flex-1">
-        <h1 className="text-[15px] font-medium text-zinc-100">
+      <div className="order-last w-full min-w-0 md:order-none md:w-auto md:flex-1">
+        <h1 className="text-sm font-medium text-zinc-100 md:text-[15px]">
           Convert LaTeX, Markdown, Typst, Word and HTML, right in your browser.
         </h1>
         <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
@@ -108,8 +108,10 @@ export function Header() {
           <Fact icon={<Package className="h-3 w-3" />}>MIT licensed</Fact>
         </p>
       </div>
-      <nav className="flex items-center gap-2">
-        <WorkspaceMenu />
+      <nav className="ml-auto flex items-center gap-2">
+        <div className="hidden md:block">
+          <WorkspaceMenu />
+        </div>
         <a
           href={NPM_URL}
           target="_blank"
