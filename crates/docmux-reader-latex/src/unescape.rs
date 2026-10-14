@@ -54,6 +54,14 @@ pub fn unescape_latex(input: &str) -> String {
                         out.push('_');
                         chars.next();
                     }
+                    ',' | ' ' => {
+                        out.push(' ');
+                        chars.next();
+                    }
+                    // Discretionary hyphen, italic correction, end-of-sentence spacing.
+                    '-' | '/' | '@' => {
+                        chars.next();
+                    }
                     _ => out.push('\\'),
                 }
             } else {
@@ -64,6 +72,17 @@ pub fn unescape_latex(input: &str) -> String {
         }
     }
     out
+}
+
+/// Apply TeX's text ligatures: ``` `` ``` and `''` quotes, `--` and `---`
+/// dashes.
+pub fn typographic(input: &str) -> String {
+    input
+        .replace("---", "\u{2014}")
+        .replace("--", "\u{2013}")
+        .replace("``", "\u{201C}")
+        .replace("''", "\u{201D}")
+        .replace('`', "\u{2018}")
 }
 
 #[cfg(test)]
@@ -100,6 +119,22 @@ mod tests {
         assert_eq!(
             unescape_latex(r"Price is \$10 \& tax is 5\%"),
             "Price is $10 & tax is 5%"
+        );
+    }
+
+    #[test]
+    fn unescape_spacing_and_hints() {
+        assert_eq!(
+            unescape_latex(r"e.g.\ this, hy\-phen, i.e.\@ ok, a\,b"),
+            "e.g. this, hyphen, i.e. ok, a b"
+        );
+    }
+
+    #[test]
+    fn typographic_ligatures() {
+        assert_eq!(
+            typographic("a ``rank'' b `x' 1--2 a---b"),
+            "a \u{201C}rank\u{201D} b \u{2018}x' 1\u{2013}2 a\u{2014}b"
         );
     }
 

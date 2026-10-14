@@ -255,8 +255,38 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     continue;
                 }
 
-                // 5. Lone backslash — treat as text.
+                // 5. Inline math: \(...\)
+                if i < len && chars[i] == '(' {
+                    flush_text!();
+                    i += 1;
+                    let mut math = String::new();
+                    while i < len && !(chars[i] == '\\' && chars.get(i + 1) == Some(&')')) {
+                        if chars[i] == '\n' {
+                            line += 1;
+                        }
+                        math.push(chars[i]);
+                        i += 1;
+                    }
+                    i = (i + 2).min(len);
+                    tokens.push(Token::MathInline { value: math });
+                    continue;
+                }
+
+                // 6. Accents: \'e, \"{o}, \~n → the accented character.
+                if let Some((accented, consumed)) = accent(&chars[i..]) {
+                    text_buf.push_str(&accented);
+                    i += consumed;
+                    continue;
+                }
+
+                // 7. Control symbols (\%, \$, \&, \#, \_, \{, \}, \,, ...): keep
+                //    the escape in the text so `%` and `$` are not read as a
+                //    comment or math; `unescape_latex` resolves it later.
                 text_buf.push('\\');
+                if i < len {
+                    text_buf.push(chars[i]);
+                    i += 1;
+                }
             }
 
             // ----------------------------------------------------------------
@@ -273,6 +303,56 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     tokens
 }
 
+/// Resolve a text-mode accent command starting right after the backslash:
+/// `'e`, `"{o}`, `` `a ``, `^\i`. Returns the accented text and the number of
+/// characters consumed.
+fn accent(rest: &[char]) -> Option<(String, usize)> {
+    let mark = match rest.first()? {
+        '\'' => '\u{0301}',
+        '`' => '\u{0300}',
+        '^' => '\u{0302}',
+        '"' => '\u{0308}',
+        '~' => '\u{0303}',
+        '=' => '\u{0304}',
+        '.' => '\u{0307}',
+        _ => return None,
+    };
+    let (base, consumed) = match rest.get(1..) {
+        Some(['{', b, '}', ..]) if b.is_alphabetic() => (*b, 4),
+        Some(['{', '\\', 'i', '}', ..]) => ('i', 5),
+        // `\i` is a command: a following space only terminates it.
+        Some(['\\', 'i', ..]) => ('i', if rest.get(3) == Some(&' ') { 4 } else { 3 }),
+        Some([b, ..]) if b.is_alphabetic() => (*b, 2),
+        _ => return None,
+    };
+    Some((compose(base, mark), consumed))
+}
+
+/// Precomposed form for common Latin letters, else base + combining mark.
+fn compose(base: char, mark: char) -> String {
+    const TABLE: &[(char, &str, &str)] = &[
+        (
+            '\u{0301}',
+            "aeiouyAEIOUYncsznNCSZ",
+            "áéíóúýÁÉÍÓÚÝńćśźňŃĆŚŹŇ",
+        ),
+        ('\u{0300}', "aeiouAEIOU", "àèìòùÀÈÌÒÙ"),
+        ('\u{0302}', "aeiouAEIOU", "âêîôûÂÊÎÔÛ"),
+        ('\u{0308}', "aeiouyAEIOU", "äëïöüÿÄËÏÖÜ"),
+        ('\u{0303}', "anoANO", "ãñõÃÑÕ"),
+    ];
+    TABLE
+        .iter()
+        .find(|(m, _, _)| *m == mark)
+        .and_then(|(_, from, to)| {
+            from.chars()
+                .position(|c| c == base)
+                .and_then(|k| to.chars().nth(k))
+        })
+        .map(String::from)
+        .unwrap_or_else(|| format!("{base}{mark}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +362,56 @@ mod tests {
         let tokens = tokenize("Hello world");
         assert_eq!(tokens.len(), 1);
         assert!(matches!(&tokens[0], Token::Text { value } if value == "Hello world"));
+    }
+
+    #[test]
+    fn escaped_percent_is_not_a_comment() {
+        let tokens = tokenize(r"has 3.57\% error");
+        assert_eq!(
+            tokens,
+            vec![Token::Text {
+                value: r"has 3.57\% error".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn escaped_dollar_is_not_math() {
+        let tokens = tokenize(r"costs \$10 or \$20");
+        assert_eq!(
+            tokens,
+            vec![Token::Text {
+                value: r"costs \$10 or \$20".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn paren_inline_math() {
+        let tokens = tokenize(r"a \(x^2\) b");
+        assert_eq!(
+            tokens[1],
+            Token::MathInline {
+                value: "x^2".into()
+            }
+        );
+    }
+
+    #[test]
+    fn accents_compose() {
+        let tokens = tokenize(r#"Pe\~na, G\"{o}del, Erd\H{o}s, na\"\i ve, \'{e}t\'e"#);
+        assert!(
+            matches!(&tokens[0], Token::Text { value } if value.starts_with("Peña, Gödel, Erd"))
+        );
+        let all: String = tokens
+            .iter()
+            .filter_map(|t| match t {
+                Token::Text { value } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(all.contains("naïve"));
+        assert!(all.contains("été"));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use docmux_ast::{
 use std::collections::HashMap;
 
 use crate::lexer::Token;
-use crate::unescape::unescape_latex;
+use crate::unescape::{typographic, unescape_latex};
 
 /// Commands that should be silently consumed (with their arguments) without
 /// producing any output or warning.
@@ -162,6 +162,46 @@ impl Parser {
         s
     }
 
+    /// `\\citep[prefix][suffix]{key1,key2}` and the other natbib/biblatex
+    /// citation commands. With a single optional argument it is the suffix.
+    fn parse_citation(&mut self, command: &str) -> Inline {
+        let first = self.parse_optional_argument();
+        let second = self.parse_optional_argument();
+        let (prefix, suffix) = match (first, second) {
+            (Some(pre), Some(post)) => (Some(pre), Some(post)),
+            (Some(post), None) => (None, Some(post)),
+            _ => (None, None),
+        };
+        let non_empty = |s: Option<String>| {
+            s.map(|v| typographic(&unescape_latex(v.trim())).replace('~', "\u{00A0}"))
+                .filter(|v| !v.is_empty())
+        };
+        let (prefix, suffix) = (non_empty(prefix), non_empty(suffix));
+        let keys: Vec<String> = self
+            .parse_brace_text()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let last = keys.len().saturating_sub(1);
+        let items = keys
+            .into_iter()
+            .enumerate()
+            .map(|(k, key)| CiteItem {
+                key,
+                prefix: if k == 0 { prefix.clone() } else { None },
+                suffix: if k == last { suffix.clone() } else { None },
+            })
+            .collect();
+        let mode = match command {
+            "citet" | "citealt" | "textcite" | "Citet" | "Citealt" | "citeauthor"
+            | "Citeauthor" => CitationMode::AuthorOnly,
+            "citeyear" | "citeyearpar" => CitationMode::SuppressAuthor,
+            _ => CitationMode::Normal,
+        };
+        Inline::Citation(Citation { items, mode })
+    }
+
     /// If the next token is `BracketOpen`, consume `[...]` and return the
     /// contained text. Otherwise return `None`.
     fn parse_optional_argument(&mut self) -> Option<String> {
@@ -188,6 +228,11 @@ impl Parser {
                 }
                 Token::Text { value } => s.push_str(&value),
                 Token::Newline => s.push(' '),
+                Token::Tilde => s.push('~'),
+                Token::Command { name, .. } => {
+                    s.push('\\');
+                    s.push_str(&name);
+                }
                 _ => {}
             }
         }
@@ -499,7 +544,7 @@ impl Parser {
     fn token_to_inline(&mut self, token: Token) -> Option<Inline> {
         match token {
             Token::Text { value } => Some(Inline::Text {
-                value: unescape_latex(&value),
+                value: typographic(&unescape_latex(&value)),
             }),
             Token::Tilde => Some(Inline::Text {
                 value: "\u{00A0}".to_string(),
@@ -576,7 +621,9 @@ impl Parser {
                 Some(Inline::Strikethrough { content })
             }
             "texttt" => {
-                let value = self.parse_brace_text();
+                // \texttt is typeset text in a monospace font, not verbatim:
+                // its escapes (\{, \%, \_) are resolved like any other text.
+                let value = unescape_latex(&self.parse_brace_text());
                 Some(Inline::Code { value, attrs: None })
             }
             "textsc" => {
@@ -610,71 +657,21 @@ impl Parser {
                     attrs: None,
                 })
             }
-            "cite" => {
-                let keys_text = self.parse_brace_text();
-                let keys: Vec<String> = keys_text
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                Some(Inline::Citation(Citation {
-                    items: keys
-                        .into_iter()
-                        .map(|k| CiteItem {
-                            key: k,
-                            prefix: None,
-                            suffix: None,
-                        })
-                        .collect(),
-                    mode: CitationMode::Normal,
-                }))
+            "cite" | "citep" | "citealp" | "parencite" | "autocite" | "Citep" | "Citealp"
+            | "citet" | "citealt" | "textcite" | "Citet" | "Citealt" | "citeauthor"
+            | "Citeauthor" | "citeyear" | "citeyearpar" => Some(self.parse_citation(name)),
+            "nocite" => {
+                self.parse_brace_text();
+                None
             }
-            "citet" => {
-                let keys_text = self.parse_brace_text();
-                let keys: Vec<String> = keys_text
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                Some(Inline::Citation(Citation {
-                    items: keys
-                        .into_iter()
-                        .map(|k| CiteItem {
-                            key: k,
-                            prefix: None,
-                            suffix: None,
-                        })
-                        .collect(),
-                    mode: CitationMode::AuthorOnly,
-                }))
-            }
-            "citeyear" => {
-                let keys_text = self.parse_brace_text();
-                let keys: Vec<String> = keys_text
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                Some(Inline::Citation(Citation {
-                    items: keys
-                        .into_iter()
-                        .map(|k| CiteItem {
-                            key: k,
-                            prefix: None,
-                            suffix: None,
-                        })
-                        .collect(),
-                    mode: CitationMode::SuppressAuthor,
-                }))
-            }
-            "ref" => {
+            "ref" | "eqref" => {
                 let target = self.parse_brace_text();
                 Some(Inline::CrossRef(CrossRef {
                     target,
                     form: RefForm::Number,
                 }))
             }
-            "autoref" => {
+            "autoref" | "cref" | "Cref" => {
                 let target = self.parse_brace_text();
                 Some(Inline::CrossRef(CrossRef {
                     target,
@@ -773,6 +770,9 @@ impl Parser {
         while lookahead < self.tokens.len() {
             match &self.tokens[lookahead] {
                 Token::Newline | Token::Comment { .. } => {
+                    lookahead += 1;
+                }
+                Token::Text { value } if value.trim().is_empty() => {
                     lookahead += 1;
                 }
                 Token::Command { name, .. } if name == "label" => {
@@ -1721,6 +1721,45 @@ Some text.",
         let tokens = tokenize(r"\subsection{Details}");
         let doc = Parser::new(tokens).parse();
         assert!(matches!(&doc.content[0], Block::Heading { level: 2, .. }));
+    }
+
+    #[test]
+    fn parse_natbib_citations() {
+        let tokens = tokenize(
+            r"A \citep{a} B \citet{b,c} C \citep[see][p.~5]{d} D \citep[ch.~2]{e} \nocite{f}",
+        );
+        let doc = Parser::new(tokens).parse();
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected paragraph, got {:?}", doc.content[0]);
+        };
+        let cites: Vec<&Citation> = content
+            .iter()
+            .filter_map(|i| match i {
+                Inline::Citation(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cites.len(), 4);
+        assert!(matches!(cites[0].mode, CitationMode::Normal));
+        assert!(matches!(cites[1].mode, CitationMode::AuthorOnly));
+        assert_eq!(cites[1].items.len(), 2);
+        assert_eq!(cites[2].items[0].prefix.as_deref(), Some("see"));
+        assert_eq!(cites[2].items[0].suffix.as_deref(), Some("p.\u{00A0}5"));
+        assert_eq!(cites[3].items[0].prefix, None);
+        assert_eq!(cites[3].items[0].suffix.as_deref(), Some("ch.\u{00A0}2"));
+    }
+
+    #[test]
+    fn parse_heading_label_after_space() {
+        let tokens = tokenize(
+            r"\subsection{Attention} \label{sec:attention}
+Body.",
+        );
+        let doc = Parser::new(tokens).parse();
+        match &doc.content[0] {
+            Block::Heading { id, .. } => assert_eq!(id.as_deref(), Some("sec:attention")),
+            other => panic!("expected heading, got {other:?}"),
+        }
     }
 
     #[test]
