@@ -111,7 +111,7 @@ impl HtmlWriter {
                     } else {
                         out.push_str(&format!("<div class=\"{class}\">"));
                     }
-                    out.push_str(&escape_html(content));
+                    out.push_str(&escape_html(&aligned_for_tex(content)));
                     out.push_str("</div>\n");
                 }
             },
@@ -696,6 +696,19 @@ fn escape_html(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Display math from `align`-like environments arrives as bare rows with `&`
+/// and `\\\\`. KaTeX and MathJax only accept those inside an environment, so
+/// wrap them in `aligned`.
+fn aligned_for_tex(content: &str) -> String {
+    let bare_rows = (content.contains('&') || content.contains("\\\\"))
+        && !content.trim_start().starts_with("\\begin{");
+    if bare_rows {
+        format!("\\begin{{aligned}}\n{}\n\\end{{aligned}}", content.trim())
+    } else {
+        content.to_string()
+    }
+}
+
 /// An attribute name made only of characters HTML allows unquoted in names,
 /// so a key cannot close the tag or add attributes.
 fn attr_name(s: &str) -> String {
@@ -1117,5 +1130,55 @@ mod tests {
             .unwrap();
         assert!(!html.contains("<img"), "{html}");
         assert!(!html.contains("onerror=alert(1)>"), "{html}");
+    }
+
+    #[test]
+    fn aligned_rows_are_wrapped_for_katex() {
+        assert_eq!(
+            aligned_for_tex("a &= b \\\\ c &= d"),
+            "\\begin{aligned}\na &= b \\\\ c &= d\n\\end{aligned}"
+        );
+        assert_eq!(aligned_for_tex("x^2"), "x^2");
+        assert_eq!(
+            aligned_for_tex("\\begin{cases} a & b \\end{cases}"),
+            "\\begin{cases} a & b \\end{cases}"
+        );
+    }
+
+    #[test]
+    fn standalone_shows_title_authors_and_abstract() {
+        let doc = Document {
+            metadata: Metadata {
+                title: Some("A Paper".into()),
+                authors: vec![
+                    Author {
+                        name: "Ada".into(),
+                        affiliation: None,
+                        email: None,
+                        orcid: None,
+                    },
+                    Author {
+                        name: "Grace".into(),
+                        affiliation: None,
+                        email: None,
+                        orcid: None,
+                    },
+                ],
+                abstract_text: Some(vec![Block::text("We study things.")]),
+                ..Default::default()
+            },
+            content: vec![Block::text("Body.")],
+            ..Default::default()
+        };
+        let opts = WriteOptions {
+            standalone: true,
+            ..Default::default()
+        };
+        let html = HtmlWriter::new().write(&doc, &opts).unwrap();
+        assert!(html.contains("<h1 class=\"title\">A Paper</h1>"), "{html}");
+        assert!(html.contains("<p class=\"author\">Ada</p>"), "{html}");
+        assert!(html.contains("<p class=\"author\">Grace</p>"), "{html}");
+        assert!(html.contains("<section class=\"abstract\">"), "{html}");
+        assert!(html.contains("We study things."), "{html}");
     }
 }
