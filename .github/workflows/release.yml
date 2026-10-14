@@ -30,7 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     # Trusted publishing: npm checks this workflow's OIDC identity, so no
     # token is stored. Configured on npmjs.com for aguschirico/docmux and
-    # release.yml.
+    # release.yml, allowed to stage only: each version waits for a
+    # maintainer to approve it with 2FA (npmjs.com or `npm stage approve`).
     permissions:
       contents: read
       id-token: write
@@ -62,9 +63,9 @@ jobs:
       - name: Build WASM + TS wrapper
         run: pnpm --filter @docmux/wasm run build
 
-      - name: Update npm for trusted publishing
-        run: npm install -g npm@11 && npm --version
+      - name: Update npm for staged publishing
+        run: npm install -g npm@^11.15 && npm --version
 
-      - name: Publish to npm
-        run: npm publish --access public
+      - name: Stage on npm
+        run: npm stage publish --access public
         working-directory: npm
