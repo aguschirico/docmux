@@ -1,10 +1,11 @@
 use docmux_ast::{
-    Alignment, Author, Block, Citation, CitationMode, CiteItem, ColumnSpec, CrossRef,
+    Alignment, Attributes, Author, Block, Citation, CitationMode, CiteItem, ColumnSpec, CrossRef,
     DefinitionItem, Document, Image, Inline, ListItem, MetaValue, Metadata, ParseWarning, RefForm,
     Table, TableCell,
 };
 use std::collections::HashMap;
 
+use crate::commands::{self, GroupFormat};
 use crate::lexer::Token;
 use crate::unescape::{typographic, unescape_latex};
 
@@ -24,6 +25,20 @@ const SILENTLY_IGNORED: &[&str] = &[
     "setcounter",
 ];
 
+/// A `\\bibitem[label]` label as plain text: `ADG$^{+}$16` → `ADG+16`,
+/// `Akbik et~al.(2018)Akbik, …` keeps its natbib shape.
+fn clean_bib_label(label: &str) -> String {
+    let text: String = label
+        .chars()
+        .filter(|c| !matches!(c, '{' | '}' | '$' | '^'))
+        .map(|c| if c == '~' || c == '\u{00A0}' { ' ' } else { c })
+        .collect();
+    unescape_latex(&text)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Core recursive-descent parser for LaTeX documents.
 pub struct Parser {
     tokens: Vec<Token>,
@@ -31,7 +46,7 @@ pub struct Parser {
     warnings: Vec<ParseWarning>,
     footnote_defs: Vec<Block>,
     footnote_counter: usize,
-    abstract_text: Option<String>,
+    abstract_text: Option<Vec<Block>>,
 }
 
 impl Parser {
@@ -65,9 +80,7 @@ impl Parser {
 
         // Merge abstract text into metadata if found.
         if let Some(abs) = self.abstract_text.take() {
-            metadata.abstract_text = Some(vec![Block::Paragraph {
-                content: vec![Inline::Text { value: abs }],
-            }]);
+            metadata.abstract_text = Some(abs);
         }
 
         // Append footnote definitions at the end of the content.
@@ -107,8 +120,10 @@ impl Parser {
     ///
     /// Expects the next token to be `BraceOpen`. If not, returns an empty vec.
     fn parse_brace_argument(&mut self) -> Vec<Token> {
-        // Skip optional whitespace/newlines before the brace.
-        while matches!(self.peek(), Some(Token::Newline)) {
+        // Skip whitespace before the brace: `\\cmd {arg}` is `\\cmd{arg}`.
+        while matches!(self.peek(), Some(Token::Newline))
+            || matches!(self.peek(), Some(Token::Text { value }) if value.trim().is_empty())
+        {
             self.advance();
         }
 
@@ -162,6 +177,51 @@ impl Parser {
         s
     }
 
+    /// Commands without a dedicated handler: keep their text, drop their
+    /// layout. Truly unknown commands keep their brace argument's content.
+    fn fallback_inline_command(&mut self, name: &str, line: usize) -> Option<Inline> {
+        if let Some(text) = commands::abbreviation(name) {
+            return Some(Inline::text(text));
+        }
+        if commands::is_switch(name) {
+            return None;
+        }
+        if let Some((optional, braces)) = commands::dropped(name) {
+            self.skip_arguments(optional, braces);
+            return None;
+        }
+        if let Some((optional, braces)) = commands::wrapper(name) {
+            self.skip_arguments(optional, braces);
+            return Self::span_of(self.parse_inline_content());
+        }
+        self.warn(line, format!("Unknown command: \\{}", name));
+        if matches!(self.peek(), Some(Token::BraceOpen)) {
+            let content = self.parse_inline_content();
+            return Self::span_of(content);
+        }
+        None
+    }
+
+    fn skip_arguments(&mut self, optional: usize, braces: usize) {
+        for _ in 0..optional {
+            self.parse_optional_argument();
+        }
+        for _ in 0..braces {
+            self.parse_brace_argument();
+        }
+    }
+
+    fn span_of(content: Vec<Inline>) -> Option<Inline> {
+        match content.len() {
+            0 => None,
+            1 => content.into_iter().next(),
+            _ => Some(Inline::Span {
+                content,
+                attrs: Default::default(),
+            }),
+        }
+    }
+
     /// `\\citep[prefix][suffix]{key1,key2}` and the other natbib/biblatex
     /// citation commands. With a single optional argument it is the suffix.
     fn parse_citation(&mut self, command: &str) -> Inline {
@@ -195,7 +255,7 @@ impl Parser {
             .collect();
         let mode = match command {
             "citet" | "citealt" | "textcite" | "Citet" | "Citealt" | "citeauthor"
-            | "Citeauthor" => CitationMode::AuthorOnly,
+            | "Citeauthor" | "newcite" => CitationMode::AuthorOnly,
             "citeyear" | "citeyearpar" => CitationMode::SuppressAuthor,
             _ => CitationMode::Normal,
         };
@@ -228,6 +288,11 @@ impl Parser {
                 }
                 Token::Text { value } => s.push_str(&value),
                 Token::Newline => s.push(' '),
+                Token::MathInline { value } => {
+                    s.push('$');
+                    s.push_str(&value);
+                    s.push('$');
+                }
                 Token::Tilde => s.push('~'),
                 Token::Command { name, .. } => {
                     s.push('\\');
@@ -391,16 +456,25 @@ impl Parser {
                                 _ => 1,
                             };
                             self.advance(); // consume the command
+                            self.parse_optional_argument(); // short title for the ToC
                             let content = self.parse_inline_content();
 
                             // Peek for \label{...} after the heading.
                             let id = self.peek_label();
 
+                            // Like LaTeX's article class: starred sections and
+                            // \paragraph levels carry no number.
+                            let unnumbered = name.ends_with('*') || level >= 4;
+                            let attrs = unnumbered.then(|| Attributes {
+                                id: None,
+                                classes: vec!["unnumbered".into()],
+                                key_values: HashMap::new(),
+                            });
                             blocks.push(Block::Heading {
                                 level,
                                 id,
                                 content,
-                                attrs: None,
+                                attrs,
                             });
                             continue;
                         }
@@ -556,6 +630,14 @@ impl Parser {
             Token::Command { name, line } => self.dispatch_inline_command(&name, line),
             Token::BraceOpen => {
                 // Bare group: parse contents as inlines until BraceClose.
+                // A leading font switch (`{\\bf …}`, `{\\em …}`) formats the group.
+                let format = match self.peek() {
+                    Some(Token::Command { name, .. }) => commands::group_format(name),
+                    _ => None,
+                };
+                if format.is_some() {
+                    self.advance();
+                }
                 let mut group_inlines = Vec::new();
                 while let Some(tok) = self.peek() {
                     if matches!(tok, Token::BraceClose) {
@@ -570,8 +652,21 @@ impl Parser {
                 // Flatten: if single inline, return it; otherwise wrap in a
                 // Span or just return the first. For simplicity, return all
                 // as a sequence — we'll add the first one and extend.
+                if let Some(format) = format.filter(|f| *f != GroupFormat::Plain) {
+                    return match format {
+                        GroupFormat::Emphasis => Some(Inline::Emphasis {
+                            content: group_inlines,
+                        }),
+                        GroupFormat::Strong => Some(Inline::Strong {
+                            content: group_inlines,
+                        }),
+                        _ => Some(Inline::SmallCaps {
+                            content: group_inlines,
+                        }),
+                    };
+                }
                 if group_inlines.len() == 1 {
-                    Some(group_inlines.into_iter().next().unwrap())
+                    group_inlines.into_iter().next()
                 } else if group_inlines.is_empty() {
                     None
                 } else {
@@ -658,7 +753,7 @@ impl Parser {
                 })
             }
             "cite" | "citep" | "citealp" | "parencite" | "autocite" | "Citep" | "Citealp"
-            | "citet" | "citealt" | "textcite" | "Citet" | "Citealt" | "citeauthor"
+            | "citet" | "citealt" | "textcite" | "Citet" | "Citealt" | "citeauthor" | "newcite"
             | "Citeauthor" | "citeyear" | "citeyearpar" => Some(self.parse_citation(name)),
             "nocite" => {
                 self.parse_brace_text();
@@ -711,29 +806,43 @@ impl Parser {
                 });
                 Some(Inline::FootnoteRef { id })
             }
-            _ => {
-                // Unknown command — emit RawInline and warning.
-                // Try to consume a brace argument if present.
-                let arg_text = if matches!(self.peek(), Some(Token::BraceOpen)) {
-                    let t = self.parse_brace_text();
-                    format!("\\{}{{{}}}", name, t)
-                } else {
-                    format!("\\{}", name)
-                };
-
-                self.warn(line, format!("Unknown command: \\{}", name));
-
-                Some(Inline::RawInline {
-                    format: "latex".to_string(),
-                    content: arg_text,
-                })
+            "underline" | "uline" => Some(Inline::Underline {
+                content: self.parse_inline_content(),
+            }),
+            "textsl" => Some(Inline::Emphasis {
+                content: self.parse_inline_content(),
+            }),
+            "labelcref" => {
+                let target = self.parse_brace_text();
+                Some(Inline::CrossRef(CrossRef {
+                    target,
+                    form: RefForm::Number,
+                }))
             }
+            "verb" | "verb*" => {
+                // The lexer turns `\verb|x|` into `\verb{x}`.
+                let value = self.parse_brace_text();
+                Some(Inline::Code { value, attrs: None })
+            }
+            "hskip" | "vskip" | "kern" => {
+                if let Some(Token::Text { value }) = self.peek() {
+                    let rest = commands::strip_dimension(value).to_string();
+                    self.tokens[self.pos] = Token::Text { value: rest };
+                }
+                None
+            }
+            _ => self.fallback_inline_command(name, line),
         }
     }
 
     /// Parse a brace argument as a sequence of inlines.
     fn parse_inline_content(&mut self) -> Vec<Inline> {
         let tokens = self.parse_brace_argument();
+        self.inlines_from_tokens(tokens)
+    }
+
+    /// Parse a token list as a sequence of inlines with a sub-parser.
+    fn inlines_from_tokens(&mut self, tokens: Vec<Token>) -> Vec<Inline> {
         // Create a sub-parser to process these tokens as inlines.
         let mut sub = Parser {
             tokens,
@@ -787,6 +896,186 @@ impl Parser {
         None
     }
 
+    /// `thebibliography` (inline, or from a `.bbl` file): a references
+    /// section whose entries carry `ref-<key>` ids and their citation label.
+    fn parse_bibliography(&mut self) -> Block {
+        self.parse_brace_argument(); // widest label
+        let mut entries: Vec<(Option<String>, String, Vec<Token>)> = Vec::new();
+        while let Some(tok) = self.advance() {
+            match tok {
+                Token::EndEnv { ref name, .. } if name == "thebibliography" => break,
+                Token::Command { ref name, .. } if name == "bibitem" => {
+                    let label = self.parse_optional_argument();
+                    let key = self.parse_brace_text().trim().to_string();
+                    entries.push((label, key, Vec::new()));
+                }
+                Token::Command { ref name, .. } if name == "newblock" => {
+                    if let Some(entry) = entries.last_mut() {
+                        entry.2.push(Token::Text { value: " ".into() });
+                    }
+                }
+                // Anything before the first \bibitem is setup code.
+                other => {
+                    if let Some(entry) = entries.last_mut() {
+                        entry.2.push(other);
+                    }
+                }
+            }
+        }
+        let mut content = vec![Block::Heading {
+            level: 1,
+            id: Some("references".into()),
+            content: vec![Inline::text("References")],
+            attrs: Some(Attributes {
+                id: None,
+                classes: vec!["unnumbered".into()],
+                key_values: HashMap::new(),
+            }),
+        }];
+        for (label, key, tokens) in entries {
+            content.push(self.bibliography_entry(label, key, tokens));
+        }
+        Block::Div {
+            attrs: Attributes {
+                id: Some("refs".into()),
+                classes: vec!["references".into()],
+                key_values: HashMap::new(),
+            },
+            content,
+        }
+    }
+
+    fn bibliography_entry(
+        &mut self,
+        label: Option<String>,
+        key: String,
+        tokens: Vec<Token>,
+    ) -> Block {
+        let mut inlines = self.inlines_from_tokens(tokens);
+        let is_space = |i: &Inline| match i {
+            Inline::SoftBreak => true,
+            Inline::Text { value } => value.trim().is_empty(),
+            _ => false,
+        };
+        while inlines.first().is_some_and(is_space) {
+            inlines.remove(0);
+        }
+        while inlines.last().is_some_and(is_space) {
+            inlines.pop();
+        }
+        let mut key_values = HashMap::new();
+        if let Some(label) = label.map(|l| clean_bib_label(&l)).filter(|l| !l.is_empty()) {
+            key_values.insert("label".to_string(), label);
+        }
+        Block::Div {
+            attrs: Attributes {
+                id: Some(format!("ref-{key}")),
+                classes: vec!["csl-entry".into()],
+                key_values,
+            },
+            content: vec![Block::Paragraph { content: inlines }],
+        }
+    }
+
+    /// Environments without dedicated handling keep their content: layout
+    /// containers (`center`, `minipage`) are transparent, theorem-like ones get
+    /// their name in bold, and anything else is kept as a classed Div.
+    fn parse_container_env(&mut self, env_name: &str, line: usize) -> Block {
+        let base = env_name.trim_end_matches('*');
+        let title = Self::theorem_title(base);
+        if title.is_none() && !Self::is_layout_env(base) {
+            self.warn(line, format!("Unknown environment: {env_name}"));
+        }
+        // minipage{width}, and the [title] of a theorem.
+        let note = self.parse_optional_argument();
+        if matches!(base, "minipage" | "adjustbox" | "multicols") {
+            self.parse_brace_argument();
+        }
+        let mut content = self.parse_blocks(Some(env_name));
+        if let Some(title) = title {
+            let mut lead = match note {
+                Some(n) if !n.trim().is_empty() => format!("{title} ({}).", n.trim()),
+                _ => format!("{title}."),
+            };
+            lead.push(' ');
+            let label = if base == "proof" {
+                Inline::Emphasis {
+                    content: vec![Inline::text(lead)],
+                }
+            } else {
+                Inline::Strong {
+                    content: vec![Inline::text(lead)],
+                }
+            };
+            match content.first_mut() {
+                Some(Block::Paragraph { content: first }) => first.insert(0, label),
+                _ => content.insert(
+                    0,
+                    Block::Paragraph {
+                        content: vec![label],
+                    },
+                ),
+            }
+        }
+        Block::Div {
+            attrs: Attributes {
+                id: None,
+                classes: vec![base.to_string()],
+                key_values: HashMap::new(),
+            },
+            content,
+        }
+    }
+
+    fn is_layout_env(name: &str) -> bool {
+        matches!(
+            name,
+            "center"
+                | "flushleft"
+                | "flushright"
+                | "minipage"
+                | "small"
+                | "footnotesize"
+                | "scriptsize"
+                | "tiny"
+                | "large"
+                | "adjustbox"
+                | "multicols"
+                | "spacing"
+                | "singlespace"
+                | "onehalfspace"
+                | "doublespace"
+                | "landscape"
+                | "sloppypar"
+                | "appendices"
+                | "subappendices"
+                | "ack"
+                | "acks"
+                | "acknowledgments"
+                | "acknowledgements"
+        )
+    }
+
+    fn theorem_title(name: &str) -> Option<&'static str> {
+        Some(match name {
+            "theorem" | "thm" => "Theorem",
+            "lemma" | "lem" => "Lemma",
+            "proposition" | "prop" => "Proposition",
+            "corollary" | "cor" => "Corollary",
+            "definition" | "defn" | "dfn" => "Definition",
+            "remark" | "rem" => "Remark",
+            "example" | "ex" => "Example",
+            "claim" => "Claim",
+            "assumption" => "Assumption",
+            "conjecture" => "Conjecture",
+            "observation" => "Observation",
+            "note" => "Note",
+            "proof" => "Proof",
+            "ack" | "acks" | "acknowledgments" | "acknowledgements" => "Acknowledgments",
+            _ => return None,
+        })
+    }
+
     /// Dispatch an environment by name to the appropriate handler.
     fn parse_environment(&mut self, env_name: &str, line: usize) -> Option<Block> {
         match env_name {
@@ -797,34 +1086,43 @@ impl Parser {
             "lstlisting" => Some(self.parse_verbatim_env("lstlisting")),
             "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" | "multline"
             | "multline*" => Some(self.parse_math_env(env_name)),
-            "figure" => Some(self.parse_figure()),
-            "table" => Some(self.parse_table_env()),
-            "tabular" => {
-                let table = self.parse_tabular();
+            "eqnarray" | "eqnarray*" | "flalign" | "flalign*" | "alignat" | "alignat*" => {
+                Some(self.parse_math_env(env_name))
+            }
+            "figure" | "figure*" | "wrapfigure" | "subfigure" | "algorithm" | "algorithm*" => {
+                Some(self.parse_figure(env_name))
+            }
+            "table" | "table*" | "wraptable" => Some(self.parse_table_env(env_name)),
+            _ if Self::is_tabular_env(env_name) => {
+                let table = self.parse_tabular(env_name);
                 Some(Block::Table(table))
             }
             "abstract" => {
-                let text = self.collect_text_until_end("abstract");
-                self.abstract_text = Some(text);
+                let blocks = self.parse_blocks(Some("abstract"));
+                self.abstract_text = Some(blocks);
                 None
+            }
+            "thebibliography" => Some(self.parse_bibliography()),
+            "comment" | "filecontents" | "filecontents*" => {
+                self.collect_raw_until_end(env_name);
+                None
+            }
+            // Drawings only make sense to a TeX engine: keep them raw for
+            // LaTeX output, other writers skip raw LaTeX.
+            "tikzpicture" | "pgfpicture" | "picture" => {
+                self.warn(line, format!("Drawing kept as raw LaTeX: {env_name}"));
+                let raw_content = self.collect_raw_until_end(env_name);
+                Some(Block::RawBlock {
+                    format: "latex".to_string(),
+                    content: format!("\\begin{{{env_name}}}{raw_content}\\end{{{env_name}}}"),
+                })
             }
             "description" => Some(self.parse_description()),
             "document" => {
                 // Should not normally reach here — handled in parse_body.
                 None
             }
-            _ => {
-                // Unknown environment — collect raw tokens until \end{X}.
-                self.warn(line, format!("Unknown environment: {}", env_name));
-                let raw_content = self.collect_raw_until_end(env_name);
-                Some(Block::RawBlock {
-                    format: "latex".to_string(),
-                    content: format!(
-                        "\\begin{{{}}}{}\\end{{{}}}",
-                        env_name, raw_content, env_name
-                    ),
-                })
-            }
+            _ => Some(self.parse_container_env(env_name, line)),
         }
     }
 
@@ -880,44 +1178,6 @@ impl Parser {
         }
 
         raw
-    }
-
-    /// Collect plain text content until `\end{env_name}`, ignoring most
-    /// formatting. Used for environments like `abstract`.
-    fn collect_text_until_end(&mut self, env_name: &str) -> String {
-        let mut text = String::new();
-
-        while let Some(tok) = self.peek() {
-            if matches!(tok, Token::EndEnv { name, .. } if name == env_name) {
-                self.advance();
-                break;
-            }
-            let tok = self.advance().unwrap();
-            match tok {
-                Token::Text { value } => text.push_str(&value),
-                Token::Newline => text.push(' '),
-                Token::BlankLine => text.push(' '),
-                Token::Tilde => text.push('\u{00A0}'),
-                Token::Command { name, .. } => {
-                    // Skip known formatting commands, keep their brace text.
-                    match name.as_str() {
-                        "emph" | "textit" | "textbf" | "texttt" => {
-                            let inner = self.parse_brace_text();
-                            text.push_str(&inner);
-                        }
-                        _ => {}
-                    }
-                }
-                Token::MathInline { value } => {
-                    text.push('$');
-                    text.push_str(&value);
-                    text.push('$');
-                }
-                _ => {}
-            }
-        }
-
-        text.trim().to_string()
     }
 
     /// Parse `\begin{itemize}...\end{itemize}` or `\begin{enumerate}...\end{enumerate}`.
@@ -1172,18 +1432,33 @@ impl Parser {
     }
 
     /// Parse `\begin{figure}...\end{figure}`.
-    fn parse_figure(&mut self) -> Block {
-        // Consume optional placement arg like [htbp].
+    fn parse_figure(&mut self, env_name: &str) -> Block {
+        // Consume optional placement arg like [htbp], and wrapfigure's
+        // placement and width.
         self.parse_optional_argument();
+        if env_name == "wrapfigure" {
+            self.parse_brace_argument();
+            self.parse_brace_argument();
+        }
+        let mut table: Option<Table> = None;
 
         let mut image_url: Option<String> = None;
         let mut caption: Option<Vec<Inline>> = None;
         let mut label: Option<String> = None;
 
         while let Some(tok) = self.peek() {
-            if matches!(tok, Token::EndEnv { name, .. } if name == "figure") {
+            if matches!(tok, Token::EndEnv { name, .. } if name == env_name) {
                 self.advance();
                 break;
+            }
+
+            if let Token::BeginEnv { name, .. } = tok {
+                if Self::is_tabular_env(name) {
+                    let env = name.clone();
+                    self.advance();
+                    table.get_or_insert(self.parse_tabular(&env));
+                    continue;
+                }
             }
 
             match tok {
@@ -1198,7 +1473,8 @@ impl Parser {
                             // Skip optional arguments like [width=\textwidth].
                             self.parse_optional_argument();
                             let url = self.parse_brace_text();
-                            image_url = Some(url);
+                            // Subfigures: the first image stands for the figure.
+                            image_url.get_or_insert(url);
                         }
                         "caption" => {
                             self.advance();
@@ -1229,6 +1505,13 @@ impl Parser {
             }
         }
 
+        if let (Some(mut table), None) = (table, &image_url) {
+            // A table typeset inside a figure environment.
+            table.caption = caption;
+            table.label = label;
+            return Block::Table(table);
+        }
+
         Block::Figure {
             image: Image {
                 url: image_url.unwrap_or_default(),
@@ -1243,7 +1526,7 @@ impl Parser {
     }
 
     /// Parse `\begin{table}...\end{table}`.
-    fn parse_table_env(&mut self) -> Block {
+    fn parse_table_env(&mut self, env_name: &str) -> Block {
         // Consume optional placement arg like [htbp].
         self.parse_optional_argument();
 
@@ -1252,15 +1535,16 @@ impl Parser {
         let mut label: Option<String> = None;
 
         while let Some(tok) = self.peek() {
-            if matches!(tok, Token::EndEnv { name, .. } if name == "table") {
+            if matches!(tok, Token::EndEnv { name, .. } if name == env_name) {
                 self.advance();
                 break;
             }
 
             match tok {
-                Token::BeginEnv { ref name, .. } if name == "tabular" => {
+                Token::BeginEnv { ref name, .. } if Self::is_tabular_env(name) => {
+                    let env = name.clone();
                     self.advance();
-                    table = Some(self.parse_tabular());
+                    table.get_or_insert(self.parse_tabular(&env));
                 }
                 Token::Command { ref name, .. } => {
                     let cmd = name.clone();
@@ -1313,128 +1597,172 @@ impl Parser {
     }
 
     /// Parse `\begin{tabular}{|l|r|c|}...\end{tabular}`.
-    fn parse_tabular(&mut self) -> Table {
-        // Parse column spec from the brace argument.
+    fn parse_tabular(&mut self, env_name: &str) -> Table {
+        // `tabularx` and `tabular*` take a width before the column spec.
+        if matches!(env_name, "tabularx" | "tabular*" | "tabulary") {
+            self.parse_brace_argument();
+        }
         let col_spec_text = self.parse_brace_text();
         let columns = Self::parse_column_spec(&col_spec_text);
 
-        // Collect rows from the tabular body.
-        let mut all_rows: Vec<Vec<TableCell>> = Vec::new();
-        let mut current_row_cells: Vec<String> = Vec::new();
-        let mut current_cell = String::new();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut row: Vec<String> = Vec::new();
+        let mut cell = String::new();
+        // `&` and `\\` inside braces (`\makecell{a\\b}`) do not split cells.
+        let mut depth = 0usize;
 
-        while let Some(tok) = self.peek() {
-            if matches!(tok, Token::EndEnv { name, .. } if name == "tabular") {
-                self.advance();
-                break;
-            }
-
-            let tok = self.advance().unwrap();
-
+        while let Some(tok) = self.advance() {
             match tok {
-                Token::Ampersand => {
-                    current_row_cells.push(current_cell.trim().to_string());
-                    current_cell = String::new();
+                Token::EndEnv { ref name, .. } if name == env_name => break,
+                Token::Ampersand if depth == 0 => row.push(std::mem::take(&mut cell)),
+                Token::DoubleBackslash { .. } if depth == 0 => {
+                    row.push(std::mem::take(&mut cell));
+                    rows.push(std::mem::take(&mut row));
+                    self.skip_bracket_group();
                 }
-                Token::DoubleBackslash { .. } => {
-                    // End of row.
-                    current_row_cells.push(current_cell.trim().to_string());
-                    current_cell = String::new();
-
-                    // Filter out empty rows (that were all empty cells).
-                    let non_empty = current_row_cells.iter().any(|c| !c.is_empty());
-                    if non_empty {
-                        let cells: Vec<TableCell> = current_row_cells
-                            .iter()
-                            .map(|cell_text| {
-                                let cell_inlines = self.parse_cell_text(cell_text);
-                                TableCell {
-                                    content: if cell_inlines.is_empty() {
-                                        Vec::new()
-                                    } else {
-                                        vec![Block::Paragraph {
-                                            content: cell_inlines,
-                                        }]
-                                    },
-                                    colspan: 1,
-                                    rowspan: 1,
-                                }
-                            })
-                            .collect();
-                        all_rows.push(cells);
-                    }
-                    current_row_cells = Vec::new();
+                Token::Command { ref name, .. } if Self::is_table_rule(name) => {
+                    self.skip_rule_arguments(name);
                 }
-                Token::Command { ref name, .. }
-                    if name == "hline"
-                        || name == "toprule"
-                        || name == "midrule"
-                        || name == "bottomrule" =>
-                {
-                    // Skip horizontal rules.
+                Token::BraceOpen => {
+                    depth += 1;
+                    cell.push('{');
                 }
-                Token::Text { ref value } => current_cell.push_str(value),
-                Token::Newline => current_cell.push(' '),
-                Token::BlankLine => {}
-                Token::Tilde => current_cell.push('\u{00A0}'),
-                Token::BraceOpen => current_cell.push('{'),
-                Token::BraceClose => current_cell.push('}'),
-                Token::Command { ref name, .. } => {
-                    current_cell.push('\\');
-                    current_cell.push_str(name);
+                Token::BraceClose => {
+                    depth = depth.saturating_sub(1);
+                    cell.push('}');
                 }
-                Token::MathInline { ref value } => {
-                    current_cell.push('$');
-                    current_cell.push_str(value);
-                    current_cell.push('$');
-                }
-                Token::Comment { .. } => {}
-                _ => {}
+                other => Self::push_token_text(&mut cell, &other),
             }
         }
-
-        // Handle any trailing row without \\.
-        if !current_cell.trim().is_empty() || current_row_cells.iter().any(|c| !c.is_empty()) {
-            current_row_cells.push(current_cell.trim().to_string());
-            let non_empty = current_row_cells.iter().any(|c| !c.is_empty());
-            if non_empty {
-                let cells: Vec<TableCell> = current_row_cells
-                    .iter()
-                    .map(|cell_text| {
-                        let cell_inlines = self.parse_cell_text(cell_text);
-                        TableCell {
-                            content: if cell_inlines.is_empty() {
-                                Vec::new()
-                            } else {
-                                vec![Block::Paragraph {
-                                    content: cell_inlines,
-                                }]
-                            },
-                            colspan: 1,
-                            rowspan: 1,
-                        }
-                    })
-                    .collect();
-                all_rows.push(cells);
-            }
+        if !cell.trim().is_empty() || !row.is_empty() {
+            row.push(cell);
+            rows.push(row);
         }
+
+        let mut all_rows: Vec<Vec<TableCell>> = rows
+            .into_iter()
+            .filter(|r| r.iter().any(|c| !c.trim().is_empty()))
+            .map(|r| r.iter().map(|text| self.table_cell(text.trim())).collect())
+            .collect();
 
         // First row is the header.
-        let (header, rows) = if all_rows.is_empty() {
-            (None, Vec::new())
-        } else {
-            let header = all_rows.remove(0);
-            (Some(header), all_rows)
-        };
-
+        let header = (!all_rows.is_empty()).then(|| all_rows.remove(0));
         Table {
             caption: None,
             label: None,
             columns,
             header,
-            rows,
+            rows: all_rows,
             foot: None,
             attrs: None,
+        }
+    }
+
+    fn is_tabular_env(name: &str) -> bool {
+        matches!(
+            name,
+            "tabular" | "tabular*" | "tabularx" | "tabulary" | "longtable" | "array"
+        )
+    }
+
+    fn is_table_rule(name: &str) -> bool {
+        matches!(
+            name,
+            "hline"
+                | "toprule"
+                | "midrule"
+                | "bottomrule"
+                | "cline"
+                | "cmidrule"
+                | "specialrule"
+                | "addlinespace"
+                | "hhline"
+        )
+    }
+
+    /// Skip what follows a rule command: `\cmidrule(lr){2-3}`, `\cline{2-3}`,
+    /// `\specialrule{a}{b}{c}`, `\addlinespace[4pt]`.
+    fn skip_rule_arguments(&mut self, name: &str) {
+        self.skip_bracket_group();
+        if let Some(Token::Text { value }) = self.peek() {
+            if value.trim_start().starts_with('(') {
+                let rest = value.split_once(')').map(|(_, r)| r.to_string());
+                match rest {
+                    Some(r) if !r.is_empty() => self.tokens[self.pos] = Token::Text { value: r },
+                    _ => {
+                        self.advance();
+                    }
+                }
+            }
+        }
+        let braces = match name {
+            "cline" | "cmidrule" | "hhline" => 1,
+            "specialrule" => 3,
+            _ => 0,
+        };
+        for _ in 0..braces {
+            self.parse_brace_argument();
+        }
+    }
+
+    /// Skip an optional `[...]` group (row spacing after `\\`, rule widths).
+    fn skip_bracket_group(&mut self) {
+        let mut j = self.pos;
+        while matches!(self.tokens.get(j), Some(Token::Newline)) {
+            j += 1;
+        }
+        if matches!(self.tokens.get(j), Some(Token::BracketOpen)) {
+            self.pos = j;
+            self.parse_optional_argument();
+        }
+    }
+
+    /// Append a token's source text to a cell being collected.
+    fn push_token_text(cell: &mut String, tok: &Token) {
+        match tok {
+            Token::Text { value } => cell.push_str(value),
+            Token::Newline => cell.push(' '),
+            Token::Tilde => cell.push('~'),
+            Token::BracketOpen => cell.push('['),
+            Token::BracketClose => cell.push(']'),
+            Token::Ampersand => cell.push_str("\\&"),
+            Token::DoubleBackslash { .. } => cell.push_str("\\\\"),
+            Token::Command { name, .. } => {
+                cell.push('\\');
+                cell.push_str(name);
+                // Keep `\bf 3` from becoming `\bf3`.
+                cell.push(' ');
+            }
+            Token::MathInline { value } => {
+                cell.push('$');
+                cell.push_str(value);
+                cell.push('$');
+            }
+            _ => {}
+        }
+    }
+
+    /// Build a cell; `\multicolumn{n}` and `\multirow{n}` set its span.
+    fn table_cell(&mut self, text: &str) -> TableCell {
+        let span = |prefix: &str| {
+            text.strip_prefix(prefix)
+                .and_then(|rest| rest.trim_start().strip_prefix('{'))
+                .and_then(|rest| rest.split_once('}'))
+                .and_then(|(n, _)| n.trim().parse::<u32>().ok())
+                .filter(|n| *n > 0)
+                .unwrap_or(1)
+        };
+        let colspan = span("\\multicolumn");
+        let rowspan = span("\\multirow");
+        let inlines = self.parse_cell_text(text);
+        TableCell {
+            content: if inlines.is_empty() {
+                Vec::new()
+            } else {
+                vec![Block::Paragraph { content: inlines }]
+            },
+            colspan,
+            rowspan,
         }
     }
 
@@ -1679,15 +2007,33 @@ Body.
     }
 
     #[test]
-    fn parse_unknown_command_produces_raw_inline_and_warning() {
+    fn parse_unknown_command_keeps_its_text_and_warns() {
         let tokens = tokenize(r"\weirdcommand{arg}");
         let doc = Parser::new(tokens).parse();
         assert!(!doc.warnings.is_empty());
-        if let Block::Paragraph { content } = &doc.content[0] {
-            assert!(content
-                .iter()
-                .any(|i| matches!(i, Inline::RawInline { format, .. } if format == "latex")));
-        }
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected paragraph, got {:?}", doc.content);
+        };
+        assert!(matches!(&content[0], Inline::Text { value } if value == "arg"));
+    }
+
+    #[test]
+    fn layout_commands_keep_text_and_drop_layout() {
+        let tokens = tokenize(
+            r"A \textcolor{red}{red} \vspace{2mm}\multicolumn{2}{c}{wide} {\bf bold} {\em it} \ie{} done",
+        );
+        let doc = Parser::new(tokens).parse();
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected paragraph, got {:?}", doc.content);
+        };
+        let text = format!("{content:?}");
+        assert!(text.contains("\"red\""));
+        assert!(text.contains("\"wide\""));
+        assert!(!text.contains("2mm"));
+        assert!(content.iter().any(|i| matches!(i, Inline::Strong { .. })));
+        assert!(content.iter().any(|i| matches!(i, Inline::Emphasis { .. })));
+        assert!(text.contains("i.e."));
+        assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
     }
 
     #[test]

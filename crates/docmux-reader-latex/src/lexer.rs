@@ -251,6 +251,20 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                         name.push('*');
                         i += 1;
                     }
+                    // \verb|text|: any delimiter, verbatim content. Emitted as
+                    // \verb{text} so the parser reads one brace argument.
+                    if name.starts_with("verb") && name.len() <= 5 && i < len {
+                        let delim = chars[i];
+                        if let Some(close) = chars[i + 1..].iter().position(|&c| c == delim) {
+                            let value: String = chars[i + 1..i + 1 + close].iter().collect();
+                            i += close + 2;
+                            tokens.push(Token::Command { name, line });
+                            tokens.push(Token::BraceOpen);
+                            tokens.push(Token::Text { value });
+                            tokens.push(Token::BraceClose);
+                            continue;
+                        }
+                    }
                     tokens.push(Token::Command { name, line });
                     continue;
                 }

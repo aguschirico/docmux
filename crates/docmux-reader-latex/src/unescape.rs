@@ -54,8 +54,11 @@ pub fn unescape_latex(input: &str) -> String {
                         out.push('_');
                         chars.next();
                     }
-                    ',' | ' ' => {
+                    ',' | ' ' | ';' | ':' | '>' => {
                         out.push(' ');
+                        chars.next();
+                    }
+                    '!' => {
                         chars.next();
                     }
                     // Discretionary hyphen, italic correction, end-of-sentence spacing.
