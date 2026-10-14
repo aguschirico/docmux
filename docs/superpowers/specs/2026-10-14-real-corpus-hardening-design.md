@@ -1,7 +1,7 @@
 # Real-corpus hardening (LaTeX to Typst first): design
 
 **Date:** 2026-10-14
-**Status:** LaTeX → Typst done (8/8 papers clean); citations from `.bbl` next
+**Status:** LaTeX → Typst done (8/8 papers clean), citations from `.bbl` done; playground next
 
 ## Problem
 
@@ -101,9 +101,22 @@ What changed:
   natbib/biblatex citation commands with optional arguments, `\eqref`,
   `\cref`, labels after a space, `\texttt` unescaping.
 
+## Citations and references (2026-10-14)
+
+- The LaTeX reader replaces `\bibliography{x}` with `x.bbl` (the CLI loads
+  `<main>.bbl` and `x.bbl`; WASM callers pass them in `files`) and parses
+  `thebibliography` into `Div#refs` with one `Div#ref-<key>.csl-entry` per
+  entry, carrying the `\bibitem` label.
+- `docmux-transform-references` resolves citations against that list:
+  numeric `[1, 2]`, alphabetic `[BCV13]`, or natbib author-year
+  `(Kingma and Ba, 2015)` / `Kingma and Ba (2015)`, each a link.
+- `docmux-pipeline` runs references, cross-references and math notation
+  for every conversion, in the CLI and in WASM (which before skipped math
+  conversion entirely).
+- Unknown environments and commands keep their content; layout is dropped.
+
 ## Next
 
-1. Citations from `.bbl` (arXiv ships `.bbl`, rarely `.bib`): parse
-   `thebibliography`, emit a references section with anchors, and render
-   citations as numbered or author-year links in every writer.
+1. Playground redesign (spec to follow).
 2. More corpus: Typst and DOCX inputs, non-ML LaTeX (math, physics).
+3. biblatex `.bbl` (`\entry` data format) is not read yet.
