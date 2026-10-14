@@ -52,25 +52,29 @@ if [ "$RUST_CHANGED" = true ]; then
         fail "cargo fmt — run 'cargo fmt --all' to fix"
     fi
 
-    # Clippy (includes cargo check)
-    if cargo clippy --workspace --all-targets -- -D warnings 2>&1 | grep -q "^error"; then
-        fail "cargo clippy — see warnings above"
-    else
+    # Clippy (includes cargo check). Use the exit status: piping into
+    # `grep -q` under pipefail reads a match as a failure of the pipeline.
+    if OUT=$(cargo clippy --workspace --all-targets -- -D warnings 2>&1); then
         pass "cargo clippy"
+    else
+        echo "$OUT" | tail -40
+        fail "cargo clippy — see errors above"
     fi
 
     # Tests
-    if cargo test --workspace 2>&1 | grep -qE "^test result:.*FAILED|error\["; then
-        fail "cargo test — tests are failing"
-    else
+    if OUT=$(cargo test --workspace --no-fail-fast 2>&1); then
         pass "cargo test"
+    else
+        grep -E "^error|panicked|FAILED|failures:" <<< "$OUT" | head -40
+        fail "cargo test — tests are failing"
     fi
 
     # unwrap() in lib code (staged additions only, warn-only)
     UNWRAP_FILES=""
     while IFS= read -r file; do
         if [[ "$file" == *.rs ]] && [[ "$file" != */tests/* ]] && [[ "$file" != */tests.rs ]]; then
-            if git diff --cached -- "$file" | grep '^+' | grep -v '^+++' | grep -v '#\[cfg(test)\]' | grep -qF '.unwrap()'; then
+            ADDED=$(git diff --cached -- "$file" | grep '^+' | grep -v '^+++' || true)
+            if grep -v '#\[cfg(test)\]' <<< "$ADDED" | grep -qF '.unwrap()'; then
                 UNWRAP_FILES="$UNWRAP_FILES $file"
             fi
         fi
@@ -122,7 +126,8 @@ if [ "$TS_CHANGED" = true ]; then
     ANY_FILES=""
     while IFS= read -r file; do
         if [[ "$file" == *.ts || "$file" == *.tsx ]]; then
-            if git diff --cached -- "$file" | grep '^\+' | grep -v '^\+\+\+' | grep -qE ':\s*any\b|<any>|as any\b'; then
+            ADDED=$(git diff --cached -- "$file" | grep '^+' | grep -v '^+++' || true)
+            if grep -qE ':[[:space:]]*any([^[:alnum:]_]|$)|<any>|as any([^[:alnum:]_]|$)' <<< "$ADDED"; then
                 ANY_FILES="$ANY_FILES $file"
             fi
         fi
