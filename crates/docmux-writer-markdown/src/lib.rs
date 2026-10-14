@@ -199,7 +199,7 @@ impl MarkdownWriter {
                     let alt = image.alt_text();
                     out.push_str(&alt);
                 }
-                out.push_str(&format!("]({})", &image.url));
+                out.push_str(&format!("]({})", image.url));
                 if let Some(title) = &image.title {
                     // Rewrite to include title
                     let url = &image.url;

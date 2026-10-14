@@ -625,7 +625,7 @@ smith2020:
             assert!(
                 matches!(&content[1], Inline::Text { .. }),
                 "Expected Inline::Text, got {:?}",
-                &content[1]
+                content[1]
             );
             // Should contain author and year (Chicago author-date)
             if let Inline::Text { value } = &content[1] {
