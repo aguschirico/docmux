@@ -8,6 +8,7 @@
 
 pub(crate) mod flatten;
 pub(crate) mod lexer;
+pub(crate) mod macros;
 pub(crate) mod parser;
 pub(crate) mod unescape;
 
@@ -45,9 +46,22 @@ impl LatexReader {
         input: &str,
         files: &HashMap<String, String>,
     ) -> Result<Document> {
-        let tokens = lexer::tokenize(input);
+        // User macros may be defined in any file and used in any other.
+        let mut defs = macros::Macros::default();
+        let main = macros::collect(input, &mut defs);
+        let files: HashMap<String, String> = files
+            .iter()
+            .map(|(name, source)| (name.clone(), macros::collect(source, &mut defs)))
+            .collect();
+        let main = macros::expand(&main, &defs);
+        let files: HashMap<String, String> = files
+            .into_iter()
+            .map(|(name, source)| (name, macros::expand(&source, &defs)))
+            .collect();
+
+        let tokens = lexer::tokenize(&main);
         let mut warnings = Vec::new();
-        let flat = flatten::flatten_includes(tokens, files, &mut warnings);
+        let flat = flatten::flatten_includes(tokens, &files, &mut warnings);
         let mut doc = parser::Parser::new(flat).parse();
         // Surface flatten warnings before parser warnings.
         warnings.extend(std::mem::take(&mut doc.warnings));
