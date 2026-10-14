@@ -1,0 +1,9 @@
+# arXiv id	main file	short name
+1312.6114	iclr14_sva.tex	VAE
+1412.6980	arxiv.tex	Adam
+1512.03385	residual_v1_arxiv_release.tex	ResNet
+1706.03762	ms.tex	Transformer
+1810.04805	main.tex	BERT
+2005.14165	main.tex	GPT-3
+2006.11239	main.tex	DDPM
+2106.09685	iclr2022_conference.tex	LoRA

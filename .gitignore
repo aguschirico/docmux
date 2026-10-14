@@ -13,3 +13,4 @@ CLAUDE.local.md
 npm/bundler/
 npm/node/
 npm/dist/
+scripts/corpus/.cache/
