@@ -131,3 +131,19 @@ html {
     @apply font-sans;
   }
 }
+/* docx-preview: pages on the playground's dark backdrop. */
+.word-preview .docx-wrapper {
+  background: transparent;
+  padding: 24px 16px 48px;
+}
+.word-preview .docx-wrapper > section.docx {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 40px rgb(0 0 0 / 0.45);
+  margin-bottom: 24px;
+}
+.word-preview math {
+  font-family: "STIX Two Math", "Cambria Math", "Latin Modern Math", math;
+}
+/* Equation arrays are tables; keep display style inside display math. */
+.word-preview math[display="block"] mtable {
+  math-style: normal;
+}
