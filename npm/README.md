@@ -1,6 +1,6 @@
 # @docmux/wasm
 
-Universal document converter — WASM bindings for [docmux](https://github.com/aguschirico/docmux).
+The WebAssembly build of [docmux](https://github.com/aguschirico/docmux), a document converter written in Rust.
 
 Convert between Markdown, LaTeX, Typst, MyST, HTML, DOCX, and plaintext in the browser or Node.js.
 
@@ -21,8 +21,9 @@ if (result.error) {
   console.error(result.error);
 } else {
   console.log(result.output);
-  // <h1>Hello</h1>
+  // <h1 id="hello">1 Hello</h1>
   // <p>World!</p>
+  // (sections are numbered in the text for writers that don't number them)
 }
 
 // Standalone conversion (full HTML document with <head>, <body>, etc.)
@@ -48,12 +49,12 @@ await convert("\\textbf{bold} and \\textit{italic}", "latex", "html");
 await convert("= Heading\nSome *emphasized* text.", "typst", "markdown");
 
 // HTML → Plaintext
-await convert("<h1>Title</h1><p>Content</p>", "html", "plaintext");
+await convert("<h1>Title</h1><p>Content</p>", "html", "plain");
 ```
 
 ## Binary formats (DOCX)
 
-DOCX files are binary — use the `Bytes` variants with `Uint8Array` input:
+DOCX files are binary, so use the `Bytes` variants with `Uint8Array` input:
 
 ```typescript
 import { convertBytes, convertBytesStandalone, parseBytesToJson } from "@docmux/wasm";
@@ -94,9 +95,9 @@ if (!ast.error) {
 | HTML5 | `"html"` | ✅ | ✅ |
 | LaTeX | `"latex"` or `"tex"` | ✅ | ✅ |
 | Typst | `"typst"` | ✅ | ✅ |
-| MyST Markdown | `"myst"` | ✅ | — |
+| MyST Markdown | `"myst"` | ✅ | ✅ |
 | DOCX (binary) | `"docx"` | ✅ | ✅ |
-| Plaintext | `"plaintext"` or `"txt"` | — | ✅ |
+| Plaintext | `"plain"` or `"txt"` | ❌ | ✅ |
 
 List formats programmatically:
 
@@ -130,10 +131,10 @@ Check `result.error` to narrow the type:
 ```typescript
 const result = await convert(input, "markdown", "html");
 if (result.error) {
-  // result is ConversionError — result.output is null
+  // result is ConversionError: result.output is null
   showError(result.error);
 } else {
-  // result is ConversionResult — result.output is string
+  // result is ConversionResult: result.output is string
   render(result.output);
 }
 ```
@@ -157,9 +158,9 @@ const formats = inputFormats(); // string[]
 
 ## Environment support
 
-- **Bundler** (Vite, Webpack, etc.) — import normally, the bundler handles `.wasm` loading
-- **Node.js** — WASM loads automatically from the filesystem
+- **Bundler** (Vite, Webpack, etc.): import normally, the bundler handles `.wasm` loading
+- **Node.js**: WASM loads automatically from the filesystem
 
 ## License
 
-MIT — see [LICENSE](https://github.com/aguschirico/docmux/blob/main/LICENSE).
+MIT, see [LICENSE](https://github.com/aguschirico/docmux/blob/main/LICENSE).

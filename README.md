@@ -63,7 +63,7 @@ const result = await convert("# Hello\n\nWorld!", "markdown", "html");
 if (result.error) {
   console.error(result.error);
 } else {
-  console.log(result.output); // <h1>Hello</h1>\n<p>World!</p>
+  console.log(result.output); // <h1 id="hello">1 Hello</h1>\n<p>World!</p>\n
 }
 ```
 
