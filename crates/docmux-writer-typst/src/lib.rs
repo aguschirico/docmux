@@ -495,7 +495,7 @@ impl TypstWriter {
         if let Some(header) = &table.header {
             out.push_str("  table.header(\n");
             for cell in header {
-                out.push_str("    [");
+                out.push_str(&cell_open(cell, "    "));
                 let mut cell_content = String::new();
                 self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
                 out.push_str(cell_content.trim());
@@ -506,7 +506,7 @@ impl TypstWriter {
 
         for row in &table.rows {
             for cell in row {
-                out.push_str("  [");
+                out.push_str(&cell_open(cell, "  "));
                 let mut cell_content = String::new();
                 self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
                 out.push_str(cell_content.trim());
@@ -517,7 +517,7 @@ impl TypstWriter {
         if let Some(foot) = &table.foot {
             out.push_str("  table.footer(\n");
             for cell in foot {
-                out.push_str("    [");
+                out.push_str(&cell_open(cell, "    "));
                 let mut cell_content = String::new();
                 self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
                 out.push_str(cell_content.trim());
@@ -572,11 +572,10 @@ impl TypstWriter {
                         "  date: datetime(year: {}, month: {}, day: {}),\n",
                         parts[0], parts[1], parts[2]
                     ));
-                } else {
-                    preamble.push_str(&format!("  date: \"{}\",\n", escape_typst_url(date)));
                 }
             }
             preamble.push_str(")\n\n");
+            preamble.push_str(&title_block(doc));
         }
 
         if let Some(abstract_blocks) = &doc.metadata.abstract_text {
@@ -622,6 +621,46 @@ impl Writer for TypstWriter {
             Ok(body)
         }
     }
+}
+
+/// Opening of a table cell: `[` or `table.cell(colspan: 2)[`.
+fn cell_open(cell: &TableCell, indent: &str) -> String {
+    let mut spans = Vec::new();
+    if cell.colspan > 1 {
+        spans.push(format!("colspan: {}", cell.colspan));
+    }
+    if cell.rowspan > 1 {
+        spans.push(format!("rowspan: {}", cell.rowspan));
+    }
+    if spans.is_empty() {
+        format!("{indent}[")
+    } else {
+        format!("{indent}table.cell({})[", spans.join(", "))
+    }
+}
+
+/// The visible title, authors and date, centered like LaTeX's \\maketitle.
+/// (`#set document` only fills the PDF metadata.)
+fn title_block(doc: &Document) -> String {
+    let meta = &doc.metadata;
+    let mut lines = Vec::new();
+    if let Some(title) = &meta.title {
+        lines.push(format!(
+            "#text(size: 1.6em, weight: \"bold\")[{}]",
+            escape_typst(title)
+        ));
+    }
+    if !meta.authors.is_empty() {
+        let names: Vec<String> = meta.authors.iter().map(|a| escape_typst(&a.name)).collect();
+        lines.push(names.join(", "));
+    }
+    if let Some(date) = &meta.date {
+        lines.push(escape_typst(date));
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("#align(center)[\n{}\n]\n\n", lines.join(" \\\n"))
 }
 
 fn starts_label_char(inline: &Inline) -> bool {
