@@ -438,11 +438,12 @@ impl DocxBuilder {
 
         self.body_xml.push_str("<w:tbl>\n");
 
-        // Table properties: auto-width, grid borders
+        // Table properties: auto width, centered, grid borders, cell padding
         self.body_xml.push_str(
             "<w:tblPr>\
              <w:tblStyle w:val=\"TableGrid\"/>\
              <w:tblW w:w=\"0\" w:type=\"auto\"/>\
+             <w:jc w:val=\"center\"/>\
              <w:tblBorders>\
              <w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
              <w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
@@ -451,6 +452,12 @@ impl DocxBuilder {
              <w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
              <w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>\
              </w:tblBorders>\
+             <w:tblCellMar>\
+             <w:top w:w=\"40\" w:type=\"dxa\"/>\
+             <w:left w:w=\"115\" w:type=\"dxa\"/>\
+             <w:bottom w:w=\"40\" w:type=\"dxa\"/>\
+             <w:right w:w=\"115\" w:type=\"dxa\"/>\
+             </w:tblCellMar>\
              <w:tblLook w:val=\"04A0\"/>\
              </w:tblPr>\n",
         );

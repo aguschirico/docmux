@@ -164,4 +164,6 @@ export const EDITOR_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
   hideCursorInOverviewRuler: true,
   scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
   guides: { indentation: false },
+  // Converted text has non-breaking spaces (LaTeX `~`) on purpose.
+  unicodeHighlight: { invisibleCharacters: false, ambiguousCharacters: false, nonBasicASCII: false },
 };
