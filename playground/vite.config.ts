@@ -7,6 +7,9 @@ import path from "path";
 export default defineConfig({
   plugins: [wasm(), react(), tailwindcss()],
   resolve: {
+    // @docx-editor.dev is hoisted to the workspace root; without this it
+    // resolves a second copy of React from there.
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Check, ChevronDown, Copy, Download, FileDown } from "lucide-react";
+import { Check, ChevronDown, Copy, Download } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +21,7 @@ import {
 import { useConversion, type ConversionInput, type ConversionState } from "@/hooks/useConversion";
 import { HtmlPreview } from "@/components/output-tabs/HtmlPreview";
 import { ReadOnlyEditor } from "@/components/output-tabs/ReadOnlyEditor";
+import { WordView } from "@/components/output-tabs/WordView";
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const encoder = new TextEncoder();
@@ -116,20 +117,17 @@ function Actions({ tab, state, baseName }: { tab: OutputTab; state: ConversionSt
   );
 }
 
-function Body({ tab, state, baseName }: { tab: OutputTab; state: ConversionState; baseName: string }) {
+function Centered({ children }: { children: string }) {
+  return <div className="flex h-full items-center justify-center text-sm text-zinc-500">{children}</div>;
+}
+
+function Body({ tab, state }: { tab: OutputTab; state: ConversionState }) {
   if (tab.id === PREVIEW_TAB) return <HtmlPreview html={state.preview} />;
   if (isBinaryFormat(tab.id)) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <FileDown className="h-8 w-8 text-zinc-500" />
-        <p className="text-sm text-zinc-300">
-          {state.binaryOutput
-            ? `${baseName}.${tab.extension} is ready (${Math.ceil(state.binaryOutput.length / 1024)} KB)`
-            : "Converting…"}
-        </p>
-        <p className="text-xs text-zinc-500">Use Save to download it and open it in Word.</p>
-      </div>
-    );
+    if (!state.binaryOutput) {
+      return <Centered>{state.errors.length > 0 ? "Could not convert: see the error below." : "Converting…"}</Centered>;
+    }
+    return <WordView bytes={state.binaryOutput} />;
   }
   return <ReadOnlyEditor value={state.source} language={tab.language} emptyMessage="Converting…" />;
 }
@@ -203,7 +201,7 @@ export function OutputPanel({ tabId, onTabChange }: OutputPanelProps) {
         <Actions tab={tab} state={state} baseName={baseName} />
       </div>
       <div className="min-h-0 flex-1">
-        <Body tab={tab} state={state} baseName={baseName} />
+        <Body tab={tab} state={state} />
       </div>
       <StatusLine tab={tab} state={state} />
     </div>

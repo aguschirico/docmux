@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, updateFileContent } from "@/vfs/db";
 import { debounce } from "@/lib/debounce";
@@ -38,8 +38,12 @@ export function useActiveFile(fileId: number | null) {
     [fileId, debouncedSave],
   );
 
+  const bytes = file?.binaryContent;
+  const binary = useMemo(() => (bytes ? new Uint8Array(bytes) : null), [bytes]);
+
   return {
     content: localContent,
+    binary,
     filePath: file?.path ?? null,
     onChange: handleChange,
   };

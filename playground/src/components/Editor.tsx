@@ -9,6 +9,7 @@ import { useDropZone } from "@/hooks/useDropZone";
 import { useImageDrop } from "@/hooks/useImageDrop";
 import { getMonacoLanguage, isBinaryFormat } from "@/lib/formats";
 import { EDITOR_OPTIONS, MONACO_THEME, setupMonaco } from "@/lib/monaco";
+import { WordView } from "@/components/output-tabs/WordView";
 
 interface EmptyStateProps {
   icon: React.ReactNode;
@@ -57,7 +58,7 @@ function DocxButton({ onClick }: { onClick: () => void }) {
 
 export function Editor() {
   const { activeWorkspaceId, activeFileId } = useWorkspace();
-  const { content, filePath, onChange } = useActiveFile(activeFileId);
+  const { content, binary, filePath, onChange } = useActiveFile(activeFileId);
   const { importDocxFile, openFilePicker } = useDocxImport();
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
   const handleImageDrop = useImageDrop();
@@ -118,12 +119,16 @@ export function Editor() {
     return (
       <div className="relative h-full" {...dropProps}>
         {isDragging && <DropOverlay />}
-        <EmptyState
-          icon={<FileText className="h-5 w-5" />}
-          title={filePath}
-          description="Binary file — check Preview and AST tabs for output"
-          action={<DocxButton onClick={openFilePicker} />}
-        />
+        {binary ? (
+          <WordView bytes={binary} />
+        ) : (
+          <EmptyState
+            icon={<FileText className="h-5 w-5" />}
+            title={filePath}
+            description="Binary file: see the output tabs"
+            action={<DocxButton onClick={openFilePicker} />}
+          />
+        )}
       </div>
     );
   }

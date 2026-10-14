@@ -7,6 +7,7 @@ import {
   convertWithResources,
   convertWithFiles,
   convertToBytes,
+  convertWithFilesToBytes,
   convertBytesToBytes,
   parseToJson,
   parseBytesToJson,
@@ -85,7 +86,9 @@ async function run(input: ConversionInput, from: string, tab: string): Promise<C
     } else if (isBinaryFormat(tab)) {
       binaryOutput = binary
         ? await convertBytesToBytes(binary, from, tab, input.resources)
-        : await convertToBytes(text, from, tab, input.resources);
+        : isLatex
+          ? await convertWithFilesToBytes(text, from, tab, input.projectFiles, input.resources)
+          : await convertToBytes(text, from, tab, input.resources);
     } else {
       source = outcome(
         binary
