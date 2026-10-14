@@ -2,7 +2,7 @@
 
 Convert LaTeX, Markdown, Typst, Word, HTML and MyST in the browser, in Node or from the command line. MIT licensed, written in Rust and compiled to WebAssembly.
 
-**[Try it in the playground](https://docmux.pages.dev)**: a research paper is already loaded, and nothing leaves your browser.
+**[Try it in the playground](https://docmux.pages.dev/playground/)**: a research paper is already loaded, and nothing leaves your browser.
 
 ![The playground converting a LaTeX paper to HTML, Typst and Word, then a README and a Typst report](docs/assets/playground.gif)
 

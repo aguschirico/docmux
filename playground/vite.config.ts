@@ -6,6 +6,14 @@ import path from "path";
 
 export default defineConfig({
   plugins: [wasm(), react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      input: {
+        landing: path.resolve(__dirname, "index.html"),
+        playground: path.resolve(__dirname, "playground/index.html"),
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

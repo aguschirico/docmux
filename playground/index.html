@@ -10,16 +10,288 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
     />
-    <title>docmux playground</title>
-    <meta name="description" content="Convert LaTeX, Markdown, Typst, Word and HTML in your browser. Rust compiled to WebAssembly: your documents never leave your machine." />
-    <meta property="og:title" content="docmux playground" />
-    <meta property="og:description" content="Convert LaTeX, Markdown, Typst, Word and HTML in your browser. Rust compiled to WebAssembly: your documents never leave your machine." />
+    <title>docmux: convert LaTeX, Typst, Markdown and Word</title>
+    <meta name="description" content="docmux is an open source document converter written in Rust and compiled to WebAssembly. Convert LaTeX, Typst, Markdown, Word, HTML and MyST in the browser, in Node or from the command line." />
+    <meta property="og:title" content="docmux: convert LaTeX, Typst, Markdown and Word" />
+    <meta property="og:description" content="An open source document converter written in Rust and compiled to WebAssembly. It runs in your browser, so your documents never leave your machine." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://docmux.pages.dev/" />
+    <link rel="canonical" href="https://docmux.pages.dev/" />
     <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="/src/landing/landing.css" />
   </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+  <body class="bg-zinc-950 font-sans text-zinc-300 antialiased">
+    <!-- Nav -->
+    <header class="sticky top-0 z-20 border-b border-zinc-800/70 bg-zinc-950/80 backdrop-blur">
+      <div class="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
+        <a href="/" class="flex items-center gap-2.5" aria-label="docmux home">
+          <span class="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500 font-mono text-xs font-bold text-zinc-950 shadow-[0_0_24px_-6px] shadow-sky-500/60">d</span>
+          <span class="font-mono text-base font-semibold tracking-tight text-zinc-50">docmux</span>
+        </a>
+        <nav class="ml-auto flex items-center gap-1 text-sm">
+          <a href="#use" class="hidden rounded-md px-3 py-1.5 text-zinc-400 transition-colors hover:text-zinc-50 sm:inline-block">Install</a>
+          <a href="#formats" class="hidden rounded-md px-3 py-1.5 text-zinc-400 transition-colors hover:text-zinc-50 sm:inline-block">Formats</a>
+          <a href="https://www.npmjs.com/package/@docmux/wasm" class="hidden rounded-md px-3 py-1.5 text-zinc-400 transition-colors hover:text-zinc-50 md:inline-block">npm</a>
+          <a href="https://github.com/aguschirico/docmux" class="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-zinc-400 transition-colors hover:text-zinc-50">
+            <svg viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4 fill-current"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <span class="hidden sm:inline">GitHub</span>
+          </a>
+          <a href="/playground/" class="ml-1 rounded-md bg-zinc-100 px-3 py-1.5 font-medium text-zinc-950 transition-colors hover:bg-white">Playground</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <!-- Hero -->
+      <section class="relative overflow-hidden">
+        <div aria-hidden="true" class="pointer-events-none absolute inset-x-0 -top-40 mx-auto h-[28rem] max-w-4xl rounded-full bg-gradient-to-br from-sky-500/20 via-indigo-500/15 to-transparent blur-3xl"></div>
+        <div class="relative mx-auto max-w-6xl px-4 pt-16 pb-12 sm:px-6 sm:pt-24">
+          <p class="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-zinc-400">
+            <span class="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-zinc-300">v0.6.0</span>
+            <span>Open source, MIT</span>
+            <span aria-hidden="true" class="text-zinc-700">/</span>
+            <span>Rust + WebAssembly</span>
+          </p>
+          <h1 class="mt-6 max-w-3xl text-4xl font-semibold tracking-tight text-zinc-50 sm:text-5xl md:text-6xl">
+            Convert documents between
+            <span class="bg-gradient-to-r from-sky-300 to-indigo-400 bg-clip-text text-transparent">LaTeX, Typst, Markdown and Word.</span>
+          </h1>
+          <p class="mt-6 max-w-2xl text-lg leading-relaxed text-zinc-400">
+            docmux is a document converter that runs in your browser. Give it a LaTeX paper and get Typst that compiles, a Word file with real equations, HTML or Markdown. Nothing is uploaded: the conversion happens on your machine.
+          </p>
+          <div class="mt-8 flex flex-wrap items-center gap-3">
+            <a href="/playground/" class="inline-flex h-11 items-center gap-2 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500 px-5 font-medium text-zinc-950 shadow-[0_0_32px_-8px] shadow-sky-500/70 transition hover:brightness-110">
+              Open the playground
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+            <button type="button" data-copy="npm install @docmux/wasm" class="group inline-flex h-11 items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/80 px-4 font-mono text-sm text-zinc-300 transition-colors hover:border-zinc-600">
+              <span class="text-zinc-600">$</span> npm install @docmux/wasm
+              <span data-copy-label class="text-xs text-zinc-500 group-hover:text-zinc-300">copy</span>
+            </button>
+          </div>
+
+          <!-- Real conversion -->
+          <figure class="mt-14">
+            <div class="grid overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 shadow-2xl shadow-black/40 lg:grid-cols-2">
+              <div class="border-b border-zinc-800 lg:border-r lg:border-b-0">
+                <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5 text-xs">
+                  <span class="font-mono text-zinc-400">paper.tex</span>
+                  <span class="rounded bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-300">LaTeX</span>
+                </div>
+<pre class="overflow-x-auto p-4 font-mono text-[13px] leading-6 text-zinc-300"><code><span class="text-sky-300">\newcommand</span>{<span class="text-sky-300">\kl</span>}[2]{D_{<span class="text-sky-300">\mathrm</span>{KL}}<span class="text-sky-300">\left</span>(#1 <span class="text-sky-300">\,\|\,</span> #2<span class="text-sky-300">\right</span>)}
+
+<span class="text-sky-300">\section</span>{Variational bound}<span class="text-sky-300">\label</span>{<span class="text-amber-300">sec:bound</span>}
+For any $q(z <span class="text-sky-300">\mid</span> x)$, the evidence is bounded below:
+<span class="text-sky-300">\begin</span>{equation}<span class="text-sky-300">\label</span>{<span class="text-amber-300">eq:elbo</span>}
+  <span class="text-sky-300">\log</span> p(x) <span class="text-sky-300">\ge</span> <span class="text-sky-300">\mathbb</span>{E}_{q}<span class="text-sky-300">\left</span>[<span class="text-sky-300">\log</span> p(x <span class="text-sky-300">\mid</span> z)<span class="text-sky-300">\right</span>]
+    - <span class="text-sky-300">\kl</span>{q(z <span class="text-sky-300">\mid</span> x)}{p(z)}
+<span class="text-sky-300">\end</span>{equation}
+We maximize Eq.~<span class="text-sky-300">\eqref</span>{<span class="text-amber-300">eq:elbo</span>} over $q$.</code></pre>
+              </div>
+              <div>
+                <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5 text-xs">
+                  <span class="font-mono text-zinc-400">paper.typ</span>
+                  <span class="rounded bg-sky-500/10 px-2 py-0.5 font-medium text-sky-300">Typst</span>
+                </div>
+<pre class="overflow-x-auto p-4 font-mono text-[13px] leading-6 text-zinc-300"><code><span class="text-indigo-300">#set</span> math.equation(numbering: <span class="text-emerald-300">"(1)"</span>)
+
+<span class="text-zinc-50">= Variational bound</span> <span class="text-amber-300">&lt;sec:bound&gt;</span>
+For any $q(z divides x)$, the evidence is bounded below:
+
+$
+log p(x) gt.eq bb(E)_q[log p(x divides z)]-D_(<span class="text-emerald-300">"KL"</span>) (q(z divides x) thin||thin p(z))
+$ <span class="text-amber-300">&lt;eq:elbo&gt;</span>
+We maximize Eq. (<span class="text-indigo-300">#ref</span>(<span class="text-amber-300">&lt;eq:elbo&gt;</span>, supplement: none)) over $q$.</code></pre>
+              </div>
+            </div>
+            <figcaption class="mt-3 text-center text-sm text-zinc-500">
+              Real output of docmux 0.6.0. The macro is expanded, the labels become Typst labels, and the result compiles.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- What it's for -->
+      <section class="border-t border-zinc-900">
+        <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+          <h2 class="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">What you can do with it</h2>
+          <div class="mt-10 grid gap-4 sm:grid-cols-2">
+            <article class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
+              <h3 class="font-medium text-zinc-50">Move a LaTeX paper to Typst</h3>
+              <p class="mt-2 leading-relaxed text-zinc-400">Your own macros are expanded, references and labels carry over, and citations are resolved from the <code class="font-mono text-[0.9em] text-zinc-300">.bbl</code> file that arXiv ships with the sources.</p>
+            </article>
+            <article class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
+              <h3 class="font-medium text-zinc-50">Send a paper to someone who uses Word</h3>
+              <p class="mt-2 leading-relaxed text-zinc-400">Equations become native Word equations that can be edited, not images or LaTeX text. Cross-references jump to their target.</p>
+            </article>
+            <article class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
+              <h3 class="font-medium text-zinc-50">Convert inside your web app</h3>
+              <p class="mt-2 leading-relaxed text-zinc-400">Install the npm package and convert in the browser or in Node. No server to run, and no document leaves the user's machine.</p>
+            </article>
+            <article class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
+              <h3 class="font-medium text-zinc-50">Script it from the terminal or from Rust</h3>
+              <p class="mt-2 leading-relaxed text-zinc-400">Convert files with the <code class="font-mono text-[0.9em] text-zinc-300">docmux</code> command, or use each reader and writer as its own Rust crate.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Formats -->
+      <section id="formats" class="scroll-mt-16 border-t border-zinc-900">
+        <div class="mx-auto grid max-w-6xl gap-12 px-4 py-20 sm:px-6 lg:grid-cols-[1fr_1.2fr]">
+          <div>
+            <h2 class="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">Formats</h2>
+            <p class="mt-4 leading-relaxed text-zinc-400">Every format is a reader and a writer around one shared document tree, so any input converts to any output.</p>
+            <p class="mt-4 leading-relaxed text-zinc-400">Each reader, writer and transform is a separate Rust crate, so the WebAssembly build only carries what it uses.</p>
+            <div class="mt-8 flex flex-wrap items-center gap-2 font-mono text-xs">
+              <span class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">Reader</span>
+              <span aria-hidden="true" class="text-zinc-600">&rarr;</span>
+              <span class="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sky-200">Document tree</span>
+              <span aria-hidden="true" class="text-zinc-600">&rarr;</span>
+              <span class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">Transforms</span>
+              <span aria-hidden="true" class="text-zinc-600">&rarr;</span>
+              <span class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-300">Writer</span>
+            </div>
+          </div>
+          <div class="overflow-hidden rounded-xl border border-zinc-800">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-zinc-900/80 text-xs uppercase tracking-wide text-zinc-500">
+                <tr><th class="px-4 py-3 font-medium">Format</th><th class="px-4 py-3 text-center font-medium">Read</th><th class="px-4 py-3 text-center font-medium">Write</th></tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/80 text-zinc-300">
+                <tr><td class="px-4 py-3">LaTeX</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td></tr>
+                <tr><td class="px-4 py-3">Typst</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td></tr>
+                <tr><td class="px-4 py-3">Markdown <span class="text-zinc-500">(CommonMark + GFM)</span></td><td class="px-4 py-3 text-center text-emerald-400">&check;</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td></tr>
+                <tr><td class="px-4 py-3">Word <span class="text-zinc-500">(.docx)</span></td><td class="px-4 py-3 text-center text-emerald-400">&check;</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td></tr>
+                <tr><td class="px-4 py-3">HTML</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td></tr>
+                <tr><td class="px-4 py-3">MyST Markdown</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td></tr>
+                <tr><td class="px-4 py-3">Plain text</td><td class="px-4 py-3 text-center text-zinc-600">&ndash;</td><td class="px-4 py-3 text-center text-emerald-400">&check;</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Real papers -->
+      <section class="border-t border-zinc-900">
+        <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+          <div class="max-w-3xl">
+            <h2 class="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">Tested on real papers</h2>
+            <p class="mt-4 leading-relaxed text-zinc-400">Unit tests pass long before real documents do. So docmux is also checked against the LaTeX sources of eight well-known arXiv papers, and every failure they find becomes a small test in the crate that owns it.</p>
+          </div>
+          <ul class="mt-8 flex flex-wrap gap-2 font-mono text-sm">
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">VAE</li>
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">Adam</li>
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">ResNet</li>
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">Transformer</li>
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">BERT</li>
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">GPT-3</li>
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">DDPM</li>
+            <li class="rounded-full border border-zinc-800 bg-zinc-900/60 px-3 py-1 text-zinc-300">LoRA</li>
+          </ul>
+          <dl class="mt-10 grid gap-4 sm:grid-cols-3">
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
+              <dt class="text-sm text-zinc-400">Typst output that compiles</dt>
+              <dd class="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">8 of 8</dd>
+            </div>
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
+              <dt class="text-sm text-zinc-400">Equations written as native Word math</dt>
+              <dd class="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">1,870</dd>
+            </div>
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-6">
+              <dt class="text-sm text-zinc-400">Raw LaTeX commands left in the output</dt>
+              <dd class="mt-2 text-3xl font-semibold tracking-tight text-zinc-50">0</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <!-- Use it -->
+      <section id="use" class="scroll-mt-16 border-t border-zinc-900">
+        <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+          <h2 class="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">Install</h2>
+          <div class="mt-10 grid gap-4 lg:grid-cols-3">
+            <div class="flex min-w-0 flex-col rounded-xl border border-zinc-800 bg-zinc-900/40">
+              <div class="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
+                <h3 class="font-medium text-zinc-50">JavaScript</h3>
+                <span class="font-mono text-xs text-zinc-500">browser, Node</span>
+              </div>
+<pre class="flex-1 overflow-x-auto p-5 font-mono text-[13px] leading-6 text-zinc-300"><code><span class="text-zinc-500">$</span> npm install @docmux/wasm
+
+<span class="text-indigo-300">import</span> { convert } <span class="text-indigo-300">from</span> <span class="text-emerald-300">"@docmux/wasm"</span>;
+
+<span class="text-indigo-300">const</span> { output, error } = <span class="text-indigo-300">await</span> convert(
+  latex, <span class="text-emerald-300">"latex"</span>, <span class="text-emerald-300">"typst"</span>,
+);</code></pre>
+            </div>
+            <div class="flex min-w-0 flex-col rounded-xl border border-zinc-800 bg-zinc-900/40">
+              <div class="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
+                <h3 class="font-medium text-zinc-50">Command line</h3>
+                <span class="font-mono text-xs text-zinc-500">cargo</span>
+              </div>
+<pre class="flex-1 overflow-x-auto p-5 font-mono text-[13px] leading-6 text-zinc-300"><code><span class="text-zinc-500">$</span> cargo install docmux-cli
+
+<span class="text-zinc-500">$</span> docmux paper.tex -t typst -o paper.typ
+<span class="text-zinc-500">$</span> docmux paper.tex -o paper.docx
+<span class="text-zinc-500">$</span> docmux report.docx -o report.md</code></pre>
+            </div>
+            <div class="flex min-w-0 flex-col rounded-xl border border-zinc-800 bg-zinc-900/40">
+              <div class="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
+                <h3 class="font-medium text-zinc-50">Rust</h3>
+                <span class="font-mono text-xs text-zinc-500">crates.io</span>
+              </div>
+<pre class="flex-1 overflow-x-auto p-5 font-mono text-[13px] leading-6 text-zinc-300"><code><span class="text-zinc-500">$</span> cargo add docmux-core
+<span class="text-zinc-500">$</span> cargo add docmux-reader-latex
+<span class="text-zinc-500">$</span> cargo add docmux-writer-typst
+
+<span class="text-indigo-300">let</span> doc = LatexReader::new().read(src)?;
+<span class="text-indigo-300">let</span> opts = WriteOptions::default();
+<span class="text-indigo-300">let</span> typ = TypstWriter::new()
+    .write(&amp;doc, &amp;opts)?;</code></pre>
+            </div>
+          </div>
+          <p class="mt-6 text-sm text-zinc-500">
+            Full API and options in the <a href="https://github.com/aguschirico/docmux#readme" class="text-zinc-300 underline decoration-zinc-700 underline-offset-4 hover:decoration-zinc-400">README</a>.
+          </p>
+        </div>
+      </section>
+
+      <!-- Scope -->
+      <section class="border-t border-zinc-900">
+        <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+          <div class="max-w-3xl">
+            <h2 class="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">What it is not</h2>
+            <p class="mt-4 leading-relaxed text-zinc-400">docmux covers a part of what <a href="https://pandoc.org" class="text-zinc-300 underline decoration-zinc-700 underline-offset-4 hover:decoration-zinc-400">pandoc</a> does. pandoc handles many more formats and edge cases, and if it already works for you, there is no reason to switch. docmux is for when you need conversion inside a web app, under the MIT license, or with a focus on LaTeX, Typst and math in Word.</p>
+            <p class="mt-4 leading-relaxed text-zinc-400">It is young, and real documents still find gaps. If one of yours breaks it, <a href="https://github.com/aguschirico/docmux/issues" class="text-zinc-300 underline decoration-zinc-700 underline-offset-4 hover:decoration-zinc-400">an issue</a> with the file or a piece of it helps a lot.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="border-t border-zinc-900">
+        <div class="mx-auto flex max-w-6xl flex-col items-start gap-6 px-4 py-20 sm:px-6 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 class="text-2xl font-semibold tracking-tight text-zinc-50 sm:text-3xl">Try it with your own document</h2>
+            <p class="mt-2 text-zinc-400">The playground opens with a paper already converted. Drop in a <code class="font-mono text-[0.9em] text-zinc-300">.tex</code>, <code class="font-mono text-[0.9em] text-zinc-300">.md</code>, <code class="font-mono text-[0.9em] text-zinc-300">.typ</code> or <code class="font-mono text-[0.9em] text-zinc-300">.docx</code> file.</p>
+          </div>
+          <a href="/playground/" class="inline-flex h-11 shrink-0 items-center gap-2 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500 px-5 font-medium text-zinc-950 shadow-[0_0_32px_-8px] shadow-sky-500/70 transition hover:brightness-110">
+            Open the playground
+            <span aria-hidden="true">&rarr;</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="border-t border-zinc-900">
+      <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-8 text-sm text-zinc-500 sm:px-6">
+        <span class="font-mono text-zinc-400">docmux</span>
+        <span>MIT licensed</span>
+        <a href="https://github.com/aguschirico/docmux" class="hover:text-zinc-300">GitHub</a>
+        <a href="https://www.npmjs.com/package/@docmux/wasm" class="hover:text-zinc-300">npm</a>
+        <a href="https://crates.io/crates/docmux-cli" class="hover:text-zinc-300">crates.io</a>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/landing/landing.ts"></script>
   </body>
 </html>

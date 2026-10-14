@@ -76,12 +76,12 @@ function GitHubMark() {
 
 function Logo() {
   return (
-    <div className="flex items-center gap-2.5">
+    <a href="/" className="flex items-center gap-2.5" aria-label="docmux home">
       <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500 font-mono text-sm font-bold text-zinc-950 shadow-[0_0_24px_-6px] shadow-sky-500/60">
         d
       </div>
       <span className="font-mono text-lg font-semibold tracking-tight text-zinc-50">docmux</span>
-    </div>
+    </a>
   );
 }
 
