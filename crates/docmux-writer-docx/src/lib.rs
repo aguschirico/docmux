@@ -6,6 +6,7 @@
 
 use docmux_ast::{Alignment, Block, Document, Inline, QuoteType};
 use docmux_core::{ConvertError, Result, WriteOptions, Writer};
+use docmux_transform_math::latex_to_omml::{latex_to_omml_display, latex_to_omml_inline};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{Cursor, Write};
@@ -114,6 +115,25 @@ struct DocxBuilder {
     next_footnote_id: u32,
     next_image_id: u32,
     next_num_id: u32,
+    next_bookmark_id: u32,
+}
+
+/// Word bookmark name for a document label: hidden (leading `_`), only
+/// letters, digits and `_`, at most 40 characters.
+fn bookmark_name(label: &str) -> String {
+    let clean: String = label
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let name = format!("_{clean}");
+    if name.len() <= 40 {
+        return name;
+    }
+    // Truncated names could collide: keep a hash of the full label.
+    let hash = label.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("{}{:08x}", &name[..32], hash as u32)
 }
 
 impl DocxBuilder {
@@ -131,7 +151,24 @@ impl DocxBuilder {
             next_footnote_id: 2,
             next_image_id: 1,
             next_num_id: 1,
+            next_bookmark_id: 1,
         }
+    }
+
+    /// A bookmark at the current position, so `#label` links can jump here.
+    /// Bookmarks are allowed between paragraphs.
+    fn write_bookmark(&mut self, label: Option<&str>) {
+        let Some(label) = label.filter(|l| !l.is_empty()) else {
+            return;
+        };
+        let id = self.next_bookmark_id;
+        self.next_bookmark_id += 1;
+        write!(
+            self.body_xml,
+            "<w:bookmarkStart w:id=\"{id}\" w:name=\"{}\"/><w:bookmarkEnd w:id=\"{id}\"/>",
+            bookmark_name(label)
+        )
+        .unwrap();
     }
 
     /// Register a relationship and return its rId.
@@ -182,7 +219,10 @@ impl DocxBuilder {
                 self.write_inlines(content, &[]);
                 self.body_xml.push_str("</w:p>\n");
             }
-            Block::Heading { level, content, .. } => {
+            Block::Heading {
+                level, content, id, ..
+            } => {
+                self.write_bookmark(id.as_deref());
                 let style = format!("Heading{}", level.min(&6));
                 self.body_xml.push_str("<w:p><w:pPr><w:pStyle w:val=\"");
                 self.body_xml.push_str(&style);
@@ -199,12 +239,12 @@ impl DocxBuilder {
                     self.body_xml.push_str("</w:t></w:r></w:p>\n");
                 }
             }
-            Block::MathBlock { content, .. } => {
+            Block::MathBlock { content, label } => {
+                self.write_bookmark(label.as_deref());
                 self.body_xml
                     .push_str("<w:p><w:pPr><w:pStyle w:val=\"MathBlock\"/></w:pPr>");
-                self.body_xml.push_str("<w:r><w:t xml:space=\"preserve\">");
-                self.body_xml.push_str(&xml_escape(content));
-                self.body_xml.push_str("</w:t></w:r></w:p>\n");
+                self.body_xml.push_str(&latex_to_omml_display(content));
+                self.body_xml.push_str("</w:p>\n");
             }
             Block::BlockQuote { content } => {
                 for child in content {
@@ -232,16 +272,24 @@ impl DocxBuilder {
                 }
                 // Skip other formats
             }
-            Block::Div { content, .. } => {
+            Block::Div { content, attrs } => {
+                self.write_bookmark(attrs.id.as_deref());
                 self.write_blocks(content);
             }
             Block::Table(table) => {
+                self.write_bookmark(table.label.as_deref());
                 self.write_table(table);
             }
             list @ Block::List { .. } => {
                 self.write_list(list, 0);
             }
-            Block::Figure { image, caption, .. } => {
+            Block::Figure {
+                image,
+                caption,
+                label,
+                ..
+            } => {
+                self.write_bookmark(label.as_deref());
                 if let Some((rel_id, cx, cy)) = self.embed_image(&image.url) {
                     let img_id = self.next_image_id - 1;
                     self.body_xml
@@ -751,11 +799,7 @@ impl DocxBuilder {
                 self.body_xml.push_str("</w:t></w:r>");
             }
             Inline::MathInline { value } => {
-                self.body_xml.push_str("<w:r>");
-                self.write_run_props(run_props);
-                self.body_xml.push_str("<w:t>");
-                self.body_xml.push_str(&xml_escape(value));
-                self.body_xml.push_str("</w:t></w:r>");
+                self.body_xml.push_str(&latex_to_omml_inline(value));
             }
             Inline::SoftBreak => {
                 self.body_xml
@@ -813,11 +857,21 @@ impl DocxBuilder {
                 self.body_xml.push_str("</w:t></w:r>");
             }
             Inline::Link { url, content, .. } => {
-                let rel_id = self.add_relationship(
-                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
-                    url,
-                );
-                write!(self.body_xml, "<w:hyperlink r:id=\"{rel_id}\">").unwrap();
+                if let Some(label) = url.strip_prefix('#') {
+                    // Internal link: jump to the bookmark at the target.
+                    write!(
+                        self.body_xml,
+                        "<w:hyperlink w:anchor=\"{}\" w:history=\"1\">",
+                        bookmark_name(label)
+                    )
+                    .unwrap();
+                } else {
+                    let rel_id = self.add_relationship(
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                        url,
+                    );
+                    write!(self.body_xml, "<w:hyperlink r:id=\"{rel_id}\">").unwrap();
+                }
                 let mut props = run_props.to_vec();
                 props.push("<w:rStyle w:val=\"Hyperlink\"/>");
                 self.write_inlines(content, &props);
@@ -1420,11 +1474,11 @@ mod tests {
     }
 
     #[test]
-    fn math_block_renders_plain_text() {
+    fn math_block_is_native_word_math() {
         let doc = Document {
             content: vec![Block::MathBlock {
                 content: "E = mc^2".into(),
-                label: None,
+                label: Some("eq:energy".into()),
             }],
             ..Default::default()
         };
@@ -1435,10 +1489,73 @@ mod tests {
             xml.contains(r#"<w:pStyle w:val="MathBlock"/>"#),
             "missing MathBlock style, got:\n{xml}"
         );
+        assert!(xml.contains("<m:oMathPara><m:oMath>"), "got:\n{xml}");
+        assert!(xml.contains("<m:sSup>"), "got:\n{xml}");
+        assert!(xml.contains(r#"w:name="_eq_energy""#), "got:\n{xml}");
+    }
+
+    #[test]
+    fn inline_math_is_native_word_math() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::text("Let "),
+                    Inline::MathInline {
+                        value: r"\alpha_i".into(),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        let bytes = DocxWriter::new()
+            .write_bytes(&doc, &WriteOptions::default())
+            .unwrap();
+        let xml = extract_document_xml(&bytes);
+        assert!(xml.contains("<m:oMath><m:sSub>"), "got:\n{xml}");
+        assert!(!xml.contains(r"\alpha"), "got:\n{xml}");
+    }
+
+    #[test]
+    fn internal_links_jump_to_bookmarks() {
+        let doc = Document {
+            content: vec![
+                Block::Heading {
+                    level: 1,
+                    id: Some("sec:intro".into()),
+                    content: vec![Inline::text("Intro")],
+                    attrs: None,
+                },
+                Block::Paragraph {
+                    content: vec![Inline::Link {
+                        url: "#sec:intro".into(),
+                        title: None,
+                        content: vec![Inline::text("1")],
+                        attrs: None,
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        let bytes = DocxWriter::new()
+            .write_bytes(&doc, &WriteOptions::default())
+            .unwrap();
+        let xml = extract_document_xml(&bytes);
         assert!(
-            xml.contains("E = mc^2"),
-            "missing math content, got:\n{xml}"
+            xml.contains(r#"<w:bookmarkStart w:id="1" w:name="_sec_intro"/>"#),
+            "got:\n{xml}"
         );
+        assert!(
+            xml.contains(r#"<w:hyperlink w:anchor="_sec_intro""#),
+            "got:\n{xml}"
+        );
+    }
+
+    #[test]
+    fn long_bookmark_names_stay_within_word_limits() {
+        let long = "ref-".repeat(20);
+        let name = bookmark_name(&long);
+        assert_eq!(name.len(), 40);
+        assert_ne!(name, bookmark_name(&format!("{long}x")));
     }
 
     #[test]

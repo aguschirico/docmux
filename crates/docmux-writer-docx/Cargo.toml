@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 docmux-ast = { workspace = true }
 docmux-core = { workspace = true }
+docmux-transform-math = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
