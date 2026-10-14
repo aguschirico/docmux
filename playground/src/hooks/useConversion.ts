@@ -5,143 +5,124 @@ import {
   convertBytes,
   convertBytesStandalone,
   convertWithResources,
+  convertWithFiles,
   convertToBytes,
   convertBytesToBytes,
   parseToJson,
   parseBytesToJson,
   type ConvertOutcome,
 } from "@/wasm/docmux";
-import { isBinaryFormat } from "@/lib/formats";
+import { getFormat, isBinaryFormat } from "@/lib/formats";
+import { PREVIEW_TAB } from "@/lib/output-formats";
 
-const DEBOUNCE_MS = 200;
+const DEBOUNCE_MS = 150;
+
+export interface ConversionInput {
+  /** Path of the file being converted; its extension gives the format. */
+  path: string | null;
+  /** Text content (null for binary inputs). */
+  content: string | null;
+  /** Bytes of a binary input such as a .docx. */
+  binary: Uint8Array | null;
+  /** The project's other text files (LaTeX `\input`s, `.bbl`), as UTF-8. */
+  projectFiles: Map<string, Uint8Array>;
+  /** Images, keyed by path. */
+  resources: Map<string, Uint8Array>;
+}
 
 export interface ConversionState {
-  /** HTML preview (standalone mode for full rendering) */
+  inputFormat: string | null;
+  /** Standalone HTML, for the preview tab. */
   preview: string | null;
-  /** Source output in the selected target format (null for binary outputs) */
+  /** Converted source, for writer tabs. */
   source: string | null;
-  /** Binary output for binary target formats */
+  /** Converted bytes, for binary writers (Word). */
   binaryOutput: Uint8Array | null;
-  /** AST as pretty-printed JSON */
-  ast: string | null;
-  /** Any conversion errors */
+  /** Conversion time of the last run, in milliseconds. */
+  ms: number | null;
   errors: string[];
-  /** Whether a conversion is in progress */
   converting: boolean;
 }
 
-const INITIAL: ConversionState = {
+const EMPTY: ConversionState = {
+  inputFormat: null,
   preview: null,
   source: null,
   binaryOutput: null,
-  ast: null,
+  ms: null,
   errors: [],
   converting: false,
 };
 
-export function useConversion(
-  content: string | null,
-  inputFormat: string | null,
-  outputFormat: string,
-  binaryContent?: Uint8Array | null,
-  resources?: Map<string, Uint8Array> | null,
-): ConversionState {
-  const [state, setState] = useState<ConversionState>(INITIAL);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const seqRef = useRef(0);
+function outcome(r: ConvertOutcome, errors: string[]): string | null {
+  if (r.error) errors.push(r.error);
+  return r.output;
+}
 
-  const hasBinary = binaryContent != null && binaryContent.length > 0 && inputFormat !== null;
-  const hasText = content !== null && inputFormat !== null;
-  const hasInput = hasBinary || hasText;
-  const hasResources = resources != null && resources.size > 0;
-  const isBinaryOutput = isBinaryFormat(outputFormat);
+/** Convert the input to what `tab` shows: preview HTML, a writer's output, or the AST. */
+async function run(input: ConversionInput, from: string, tab: string): Promise<ConversionState> {
+  const errors: string[] = [];
+  const isLatex = from === "latex";
+  const binary = input.binary;
+  const text = input.content ?? "";
+  const started = performance.now();
+  let preview: string | null = null;
+  let source: string | null = null;
+  let binaryOutput: Uint8Array | null = null;
+
+  try {
+    if (tab === PREVIEW_TAB) {
+      preview = outcome(
+        binary
+          ? await convertBytesStandalone(binary, from, "html")
+          : isLatex
+            ? await convertWithFiles(text, from, "html", input.projectFiles, input.resources, true)
+            : await convertStandalone(text, from, "html"),
+        errors,
+      );
+    } else if (tab === "ast") {
+      source = outcome(binary ? await parseBytesToJson(binary, from) : await parseToJson(text, from), errors);
+    } else if (isBinaryFormat(tab)) {
+      binaryOutput = binary
+        ? await convertBytesToBytes(binary, from, tab, input.resources)
+        : await convertToBytes(text, from, tab, input.resources);
+    } else {
+      source = outcome(
+        binary
+          ? await convertBytes(binary, from, tab)
+          : isLatex
+            ? await convertWithFiles(text, from, tab, input.projectFiles, input.resources, false)
+            : input.resources.size > 0
+              ? await convertWithResources(text, from, tab, input.resources)
+              : await convert(text, from, tab),
+        errors,
+      );
+    }
+  } catch (e) {
+    errors.push(String(e));
+  }
+
+  const ms = Math.round(performance.now() - started);
+  return { inputFormat: from, preview, source, binaryOutput, ms, errors, converting: false };
+}
+
+export function useConversion(input: ConversionInput, tab: string): ConversionState {
+  const [state, setState] = useState<ConversionState>(EMPTY);
+  const seqRef = useRef(0);
+  const from = input.path ? getFormat(input.path) : null;
+  const hasInput = from !== null && (input.content !== null || input.binary !== null);
 
   useEffect(() => {
-    if (!hasInput) return;
-
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      const seq = ++seqRef.current;
+    if (!hasInput || from === null) return;
+    const seq = ++seqRef.current;
+    const timer = setTimeout(() => {
       setState((prev) => ({ ...prev, converting: true }));
-
-      const runConversion = async () => {
-        const errors: string[] = [];
-        let preview: string | null = null;
-        let source: string | null = null;
-        let binaryOutput: Uint8Array | null = null;
-        let ast: string | null = null;
-
-        // Build JS Map for WASM
-        const jsResources = new Map<string, Uint8Array>();
-        if (hasResources) {
-          resources!.forEach((v, k) => jsResources.set(k, v));
-        }
-
-        // Preview (always string HTML)
-        try {
-          let r: ConvertOutcome;
-          if (hasBinary) {
-            r = await convertBytesStandalone(binaryContent, inputFormat!, "html");
-          } else if (hasResources) {
-            r = await convertWithResources(content!, inputFormat!, "html", jsResources);
-          } else {
-            r = await convertStandalone(content!, inputFormat!, "html");
-          }
-          if (r.error) errors.push(`[preview] ${r.error}`);
-          preview = r.output;
-        } catch (e) {
-          errors.push(`[preview] ${e}`);
-        }
-
-        // Source / binary output
-        try {
-          if (isBinaryOutput) {
-            if (hasBinary) {
-              binaryOutput = await convertBytesToBytes(binaryContent, inputFormat!, outputFormat, jsResources);
-            } else {
-              binaryOutput = await convertToBytes(content!, inputFormat!, outputFormat, jsResources);
-            }
-          } else if (hasBinary) {
-            const r = await convertBytes(binaryContent, inputFormat!, outputFormat);
-            if (r.error) errors.push(`[source] ${r.error}`);
-            source = r.output;
-          } else if (hasResources) {
-            const r = await convertWithResources(content!, inputFormat!, outputFormat, jsResources);
-            if (r.error) errors.push(`[source] ${r.error}`);
-            source = r.output;
-          } else {
-            const r = await convert(content!, inputFormat!, outputFormat);
-            if (r.error) errors.push(`[source] ${r.error}`);
-            source = r.output;
-          }
-        } catch (e) {
-          errors.push(`[source] ${e}`);
-        }
-
-        // AST
-        try {
-          let r: ConvertOutcome;
-          if (hasBinary) {
-            r = await parseBytesToJson(binaryContent, inputFormat!);
-          } else {
-            r = await parseToJson(content!, inputFormat!);
-          }
-          if (r.error) errors.push(`[ast] ${r.error}`);
-          ast = r.output;
-        } catch (e) {
-          errors.push(`[ast] ${e}`);
-        }
-
-        if (seq !== seqRef.current) return;
-        setState({ preview, source, binaryOutput, ast, errors, converting: false });
-      };
-
-      runConversion();
+      run(input, from, tab).then((next) => {
+        if (seq === seqRef.current) setState(next);
+      });
     }, DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [input, from, tab, hasInput]);
 
-    return () => clearTimeout(timerRef.current);
-  }, [content, binaryContent, inputFormat, outputFormat, hasInput, hasBinary, hasResources, isBinaryOutput, resources]);
-
-  if (!hasInput) return INITIAL;
-  return state;
+  return hasInput ? state : EMPTY;
 }

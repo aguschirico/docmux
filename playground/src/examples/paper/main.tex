@@ -1,0 +1,90 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb,natbib,booktabs,multirow}
+
+% Notation used throughout the paper
+\newcommand{\vect}[1]{\mathbf{#1}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newtheorem{theorem}{Theorem}
+
+\title{Small Models, Careful Data: A Note on Fine-Tuning Budgets}
+\author{Ada Example \and Grace Sample}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We study how far a fixed compute budget goes when it is split between
+pre-training and fine-tuning. On three benchmarks, a model with
+$10\times$ fewer parameters matches a larger baseline when its fine-tuning
+data is filtered first. We give a simple bound that explains when this
+happens.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Scaling laws suggest that loss falls predictably with parameters and
+data~\citep{kaplan2020scaling}. Yet practitioners rarely train at the
+compute-optimal point: they fine-tune what already exists
+\citep[see][ch.~3]{howard2018universal}. \citet{devlin2019bert} showed that
+a single pre-trained model transfers to many tasks with little task data.
+
+We ask a narrower question: \emph{given a budget, is it better to spend it on
+a bigger model or on cleaner fine-tuning data?} Section~\ref{sec:method}
+sets up the problem and Table~\ref{tab:results} summarizes the answer.
+
+\section{Method}
+\label{sec:method}
+
+Let $\vect{x} \in \R^d$ be an input and $y \in \{1, \dots, K\}$ its label.
+We fine-tune parameters $\theta$ by minimizing the empirical risk
+\begin{align}
+  \hat{\theta} &= \argmin_{\theta} \; \frac{1}{n} \sum_{i=1}^{n}
+    \ell\left(f_\theta(\vect{x}_i), y_i\right) + \lambda \|\theta\|_2^2,
+    \label{eq:erm} \\
+  \ell(z, y) &= -\log \frac{e^{z_y}}{\sum_{k=1}^{K} e^{z_k}}.
+\end{align}
+Filtering keeps the examples whose loss under a reference model falls
+below a threshold $\tau$, which removes about 30\% of the data.
+
+\begin{theorem}[Budget split]
+If the label noise rate is $\eta < \frac{1}{2}$, filtering reduces the
+excess risk of \eqref{eq:erm} by a factor of at least $1 - 2\eta$.
+\end{theorem}
+
+\section{Results}
+
+\begin{table}[t]
+  \centering
+  \caption{Accuracy (\%) on three benchmarks. Best result in bold.}
+  \label{tab:results}
+  \begin{tabular}{lccc}
+    \toprule
+    \multirow{2}{*}{Model} & \multicolumn{3}{c}{Benchmark} \\
+    \cmidrule(lr){2-4}
+     & A & B & C \\
+    \midrule
+    Large, raw data      & 81.2 & 74.5 & 68.9 \\
+    Small, raw data      & 77.0 & 70.1 & 63.4 \\
+    Small, filtered data & \textbf{81.9} & \textbf{75.3} & 68.1 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The small model with filtered data matches or beats the large one on two of
+three benchmarks (Table~\ref{tab:results}), at a tenth of the inference
+cost. On benchmark C the gap is within one standard deviation.
+
+\section{Conclusion}
+
+Cleaning the fine-tuning set is a cheaper lever than adding parameters,
+as long as the noise rate is high enough for the bound in
+Section~\ref{sec:method} to matter.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

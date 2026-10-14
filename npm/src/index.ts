@@ -4,6 +4,7 @@ import {
   convertBytes as wasmConvertBytes,
   convertBytesStandalone as wasmConvertBytesStandalone,
   convertWithResources as wasmConvertWithResources,
+  convertWithFiles as wasmConvertWithFiles,
   convertToBytes as wasmConvertToBytes,
   convertBytesToBytes as wasmConvertBytesToBytes,
   parseToJson as wasmParseToJson,
@@ -99,6 +100,21 @@ export function convertWithResources(
   resources: Map<string, Uint8Array>,
 ): Promise<ConvertOutcome> {
   return callWasm(wasmConvertWithResources, input, from, to, resources);
+}
+
+/**
+ * Convert a LaTeX project: `files` holds the other sources (`\input`ed
+ * files, the `.bbl` bibliography) as UTF-8 bytes keyed by path.
+ */
+export function convertWithFiles(
+  input: string,
+  from: string,
+  to: string,
+  files: Map<string, Uint8Array>,
+  resources: Map<string, Uint8Array>,
+  standalone: boolean,
+): Promise<ConvertOutcome> {
+  return callWasm(wasmConvertWithFiles, input, from, to, files, resources, standalone);
 }
 
 export async function convertToBytes(

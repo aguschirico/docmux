@@ -1,35 +1,36 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { WorkspaceProvider, useWorkspace } from "@/contexts/workspace-context";
-import { ensureDefaultWorkspace, db } from "@/vfs/db";
+import { db } from "@/vfs/db";
+import { loadExample } from "@/vfs/examples";
+import { DEFAULT_EXAMPLE, type Example } from "@/examples";
 import { Header } from "@/components/Header";
-import { FileTree } from "@/components/FileTree";
-import { Editor } from "@/components/Editor";
-import { OutputTabs } from "@/components/OutputTabs";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
+import { ExampleBar } from "@/components/ExampleBar";
+import { InputPane } from "@/components/InputPane";
+import { OutputPanel } from "@/components/OutputPanel";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 
-function AutoInit() {
-  const {
-    activeWorkspaceId,
-    activeFileId,
-    setActiveWorkspaceId,
-    setActiveFileId,
-  } = useWorkspace();
+/**
+ * Open something on first render: the default example for a first visit,
+ * otherwise the first workspace and file the visitor already has.
+ */
+function useInitialDocument(onExample: (example: Example) => void) {
+  const { activeWorkspaceId, activeFileId, setActiveWorkspaceId, setActiveFileId } = useWorkspace();
 
-  // Ensure a default workspace exists, then select it
   useEffect(() => {
     if (activeWorkspaceId) return;
-    ensureDefaultWorkspace().then(async () => {
-      const first = await db.workspaces.toCollection().first();
-      if (first?.id) setActiveWorkspaceId(first.id);
+    db.workspaces.toCollection().first().then(async (first) => {
+      if (first?.id) {
+        setActiveWorkspaceId(first.id);
+        return;
+      }
+      const { workspaceId, fileId } = await loadExample(DEFAULT_EXAMPLE);
+      setActiveWorkspaceId(workspaceId);
+      setActiveFileId(fileId);
+      onExample(DEFAULT_EXAMPLE);
     });
-  }, [activeWorkspaceId, setActiveWorkspaceId]);
+  }, [activeWorkspaceId, setActiveWorkspaceId, setActiveFileId, onExample]);
 
-  // Auto-select the first file when a workspace is active but no file is selected
   useEffect(() => {
     if (!activeWorkspaceId || activeFileId) return;
     db.files
@@ -40,28 +41,28 @@ function AutoInit() {
         if (file?.id) setActiveFileId(file.id);
       });
   }, [activeWorkspaceId, activeFileId, setActiveFileId]);
-
-  return null;
 }
 
 function Layout() {
+  const [tab, setTab] = useState(DEFAULT_EXAMPLE.output);
+  const [example, setExample] = useState<string | null>(null);
+  const [onExample] = useState(() => (loaded: Example) => {
+    setExample(loaded.id);
+    setTab(loaded.output);
+  });
+  useInitialDocument(onExample);
+
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
+    <div className="flex h-dvh flex-col bg-zinc-950 text-zinc-100">
       <Header />
-      <ResizablePanelGroup
-        orientation="horizontal"
-        className="flex-1 overflow-hidden"
-      >
-        <ResizablePanel defaultSize="200px" minSize="160px" maxSize="350px">
-          <FileTree />
+      <ExampleBar activeExample={example} onLoaded={onExample} />
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+        <ResizablePanel defaultSize={50} minSize={25}>
+          <InputPane />
         </ResizablePanel>
         <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
-        <ResizablePanel defaultSize={42} minSize={20}>
-          <Editor />
-        </ResizablePanel>
-        <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
-        <ResizablePanel defaultSize={40} minSize={20}>
-          <OutputTabs />
+        <ResizablePanel defaultSize={50} minSize={25}>
+          <OutputPanel tabId={tab} onTabChange={setTab} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
@@ -71,7 +72,6 @@ function Layout() {
 export default function App() {
   return (
     <WorkspaceProvider>
-      <AutoInit />
       <Layout />
       <Toaster theme="dark" position="bottom-right" />
     </WorkspaceProvider>

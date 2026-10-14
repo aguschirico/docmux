@@ -4,6 +4,7 @@ export {
   convertBytes,
   convertBytesStandalone,
   convertWithResources,
+  convertWithFiles,
   convertToBytes,
   convertBytesToBytes,
   parseToJson,

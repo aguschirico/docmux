@@ -2,14 +2,22 @@ import { useMemo } from "react";
 
 const PREVIEW_CSS = `
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
   line-height: 1.6;
   color: #1a1a1a;
-  max-width: 48rem;
+  max-width: 46rem;
   margin: 0 auto;
-  padding: 1.5rem 2rem;
-  font-size: 15px;
+  padding: 2rem 2.5rem 4rem;
+  font-size: 16px;
 }
+header h1.title, h1.title { text-align: center; border: none; font-size: 1.9em; margin-bottom: 0.2em; }
+p.author, p.date, .author, .date { text-align: center; color: #4b5563; margin: 0.2em 0; }
+#title-block-header { margin-bottom: 2em; }
+.abstract { margin: 0 2.5em 2em; font-size: 0.95em; }
+.abstract-title { text-align: center; font-size: 1em; border: none; margin-bottom: 0.3em; }
+td p, th p { margin: 0; }
+.references p, .csl-entry p { margin: 0.4em 0; font-size: 0.93em; }
+.csl-entry { padding-left: 1.5em; text-indent: -1.5em; }
 h1, h2, h3, h4, h5, h6 {
   margin-top: 1.5em;
   margin-bottom: 0.5em;
@@ -118,7 +126,9 @@ export function HtmlPreview({ html }: HtmlPreviewProps) {
   return (
     <iframe
       srcDoc={styledHtml}
-      sandbox="allow-scripts allow-same-origin"
+      // Scripts render the math; without allow-same-origin they cannot reach
+      // the playground's storage, even if the document carries raw HTML.
+      sandbox="allow-scripts"
       title="HTML Preview"
       className="h-full w-full border-0 bg-white"
     />
