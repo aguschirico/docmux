@@ -59,7 +59,7 @@ fn split_text(tokens: &[Token]) -> Vec<Token> {
     out
 }
 
-fn text_units(t: &str) -> Vec<String> {
+pub(crate) fn text_units(t: &str) -> Vec<String> {
     let chars: Vec<char> = t.chars().collect();
     let mut units = Vec::new();
     let mut k = 0;
@@ -670,7 +670,7 @@ fn cases(body: &str) -> String {
 
 /// Drop a leading `{…}` group (the column spec of `array`, the count of
 /// `alignat`).
-fn strip_leading_group(body: &str) -> &str {
+pub(crate) fn strip_leading_group(body: &str) -> &str {
     let trimmed = body.trim_start();
     if !trimmed.starts_with('{') {
         return body;
@@ -692,7 +692,7 @@ fn strip_leading_group(body: &str) -> &str {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Separator {
+pub(crate) enum Separator {
     /// `\\` (optionally followed by `[length]`)
     Row,
     /// `&`
@@ -700,7 +700,7 @@ enum Separator {
 }
 
 /// Split on `\\` or `&` outside braces and nested environments.
-fn split_top_level(body: &str, sep: Separator) -> Vec<String> {
+pub(crate) fn split_top_level(body: &str, sep: Separator) -> Vec<String> {
     let chars: Vec<char> = body.chars().collect();
     let mut parts = vec![String::new()];
     let mut depth = 0i32;
