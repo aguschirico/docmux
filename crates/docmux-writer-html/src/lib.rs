@@ -248,10 +248,13 @@ impl HtmlWriter {
                     attr_str.push_str(&format!(" id=\"{}\"", escape_attr(id)));
                 }
                 if !attrs.classes.is_empty() {
-                    attr_str.push_str(&format!(" class=\"{}\"", attrs.classes.join(" ")));
+                    attr_str.push_str(&format!(
+                        " class=\"{}\"",
+                        escape_attr(&attrs.classes.join(" "))
+                    ));
                 }
                 for (k, v) in &attrs.key_values {
-                    attr_str.push_str(&format!(" data-{}=\"{}\"", escape_attr(k), escape_attr(v)));
+                    attr_str.push_str(&format!(" data-{}=\"{}\"", attr_name(k), escape_attr(v)));
                 }
                 out.push_str(&format!("<div{attr_str}>\n"));
                 self.write_blocks(content, opts, doc, out);
@@ -518,10 +521,13 @@ impl HtmlWriter {
                     attr_str.push_str(&format!(" id=\"{}\"", escape_attr(id)));
                 }
                 if !attrs.classes.is_empty() {
-                    attr_str.push_str(&format!(" class=\"{}\"", attrs.classes.join(" ")));
+                    attr_str.push_str(&format!(
+                        " class=\"{}\"",
+                        escape_attr(&attrs.classes.join(" "))
+                    ));
                 }
                 for (k, v) in &attrs.key_values {
-                    attr_str.push_str(&format!(" data-{}=\"{}\"", escape_attr(k), escape_attr(v)));
+                    attr_str.push_str(&format!(" data-{}=\"{}\"", attr_name(k), escape_attr(v)));
                 }
                 out.push_str(&format!("<span{attr_str}>"));
                 self.write_inlines(content, opts, doc, out);
@@ -688,6 +694,20 @@ fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// An attribute name made only of characters HTML allows unquoted in names,
+/// so a key cannot close the tag or add attributes.
+fn attr_name(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn escape_attr(s: &str) -> String {
@@ -1070,5 +1090,32 @@ mod tests {
         let html = writer.write(&doc, &opts).unwrap();
         assert!(html.contains(">10<"), "should start at 10");
         assert!(html.contains(">11<"), "should have line 11");
+    }
+
+    #[test]
+    fn div_and_span_attributes_cannot_inject_markup() {
+        let evil = "x\"><img src=x onerror=alert(1)>";
+        let attrs = Attributes {
+            id: None,
+            classes: vec![evil.into()],
+            key_values: HashMap::from([(format!("k {evil}"), evil.to_string())]),
+        };
+        let doc = Document {
+            content: vec![Block::Div {
+                attrs: attrs.clone(),
+                content: vec![Block::Paragraph {
+                    content: vec![Inline::Span {
+                        content: vec![Inline::text("t")],
+                        attrs,
+                    }],
+                }],
+            }],
+            ..Default::default()
+        };
+        let html = HtmlWriter::new()
+            .write(&doc, &WriteOptions::default())
+            .unwrap();
+        assert!(!html.contains("<img"), "{html}");
+        assert!(!html.contains("onerror=alert(1)>"), "{html}");
     }
 }

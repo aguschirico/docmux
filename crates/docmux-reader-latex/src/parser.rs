@@ -1020,7 +1020,11 @@ impl Parser {
         Block::Div {
             attrs: Attributes {
                 id: None,
-                classes: vec![base.to_string()],
+                // Environment names are arbitrary source text.
+                classes: vec![base
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                    .collect()],
                 key_values: HashMap::new(),
             },
             content,
