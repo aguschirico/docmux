@@ -44,6 +44,9 @@ impl Transform for ReferencesTransform {
         }
         let refs = References::new(entries);
         resolve_blocks(&mut doc.content, &refs);
+        if let Some(abstract_blocks) = &mut doc.metadata.abstract_text {
+            resolve_blocks(abstract_blocks, &refs);
+        }
         Ok(())
     }
 }

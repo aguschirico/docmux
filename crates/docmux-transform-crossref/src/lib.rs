@@ -40,6 +40,9 @@ impl Transform for CrossRefTransform {
 
         // Pass 2: resolve CrossRef nodes in-place
         resolve_blocks(&mut doc.content, &labels);
+        if let Some(abstract_blocks) = &mut doc.metadata.abstract_text {
+            resolve_blocks(abstract_blocks, &labels);
+        }
 
         Ok(())
     }

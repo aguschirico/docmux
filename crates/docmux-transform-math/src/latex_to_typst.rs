@@ -37,6 +37,7 @@ fn convert(tokens: &[Token], in_call: bool) -> String {
     let mut emitter = Emitter {
         out: String::new(),
         in_call,
+        script_end: None,
     };
     let mut i = 0;
     while i < tokens.len() {
@@ -84,6 +85,9 @@ fn text_units(t: &str) -> Vec<String> {
 struct Emitter {
     out: String,
     in_call: bool,
+    /// Output length right after a sub/superscript argument: a `(` here
+    /// would turn `f_theta(x)` into a call inside the subscript.
+    script_end: Option<usize>,
 }
 
 impl Emitter {
@@ -120,8 +124,10 @@ impl Emitter {
             return;
         };
         let last = self.out.chars().last();
-        let fuses = last.is_some_and(|c| c.is_alphanumeric() || matches!(c, '.' | '"' | ')'))
-            && (first.is_alphanumeric() || first == '"');
+        let word_end = last.is_some_and(|c| c.is_alphanumeric() || matches!(c, '.' | '"' | ')'));
+        // `log (a)/(b)`, not the call `log(a)` over `b`.
+        let fuses = word_end && (first.is_alphanumeric() || first == '"' || first == '(')
+            || self.script_end == Some(self.out.len()) && first == '(';
         if fuses || last.is_some_and(|c| matches!(c, '&' | '=' | '+' | '<' | '>')) {
             self.out.push(' ');
         }
@@ -146,6 +152,9 @@ impl Emitter {
             self.atom(unit);
             return;
         };
+        if matches!(c, '(' | '[') && self.script_end == Some(self.out.len()) {
+            self.out.push(' ');
+        }
         match c {
             '\'' => self.out.push('\''),
             '/' => self.out.push_str("\\/"),
@@ -175,6 +184,7 @@ impl Emitter {
         }
         self.out.push(op);
         self.out.push_str(&script_arg(tokens, i));
+        self.script_end = Some(self.out.len());
     }
 }
 
@@ -809,6 +819,13 @@ mod tests {
         assert_eq!(latex_to_typst("xy + 2ab"), "x y + 2 a b");
         assert_eq!(latex_to_typst(r"256\times256"), "256 times 256");
         assert_eq!(latex_to_typst(r"\alpha\beta"), "alpha beta");
+    }
+
+    #[test]
+    fn parenthesis_after_script_is_not_a_call() {
+        assert_eq!(latex_to_typst(r"f_\theta(x)"), "f_theta (x)");
+        assert_eq!(latex_to_typst(r"\log\frac{a}{b}"), "log (a)/(b)");
+        assert_eq!(latex_to_typst(r"x_{i}(t)"), "x_i (t)");
     }
 
     #[test]

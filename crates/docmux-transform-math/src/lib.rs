@@ -57,6 +57,9 @@ impl Transform for MathTransform {
             return Ok(());
         }
         transform_blocks(&mut doc.content, self.source_notation, self.target_format);
+        if let Some(abstract_blocks) = &mut doc.metadata.abstract_text {
+            transform_blocks(abstract_blocks, self.source_notation, self.target_format);
+        }
         Ok(())
     }
 }
@@ -298,5 +301,33 @@ mod tests {
             },
             other => panic!("expected Paragraph, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn abstract_math_is_converted() {
+        let mut doc = Document {
+            metadata: docmux_ast::Metadata {
+                abstract_text: Some(vec![Block::Paragraph {
+                    content: vec![Inline::MathInline {
+                        value: r"10\times".into(),
+                    }],
+                }]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        MathTransform {
+            target_format: MathTarget::Typst,
+            source_notation: MathNotation::LaTeX,
+        }
+        .transform(&mut doc, &TransformContext::default())
+        .unwrap();
+        let Some(blocks) = &doc.metadata.abstract_text else {
+            panic!("abstract missing");
+        };
+        assert!(matches!(
+            &blocks[0],
+            Block::Paragraph { content } if matches!(&content[0], Inline::MathInline { value } if value == "10 times")
+        ));
     }
 }
