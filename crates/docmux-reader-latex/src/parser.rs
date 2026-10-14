@@ -759,7 +759,22 @@ impl Parser {
                 self.parse_brace_text();
                 None
             }
-            "ref" | "eqref" => {
+            "eqref" => {
+                // \eqref prints the number in parentheses.
+                let target = self.parse_brace_text();
+                Some(Inline::Span {
+                    content: vec![
+                        Inline::text("("),
+                        Inline::CrossRef(CrossRef {
+                            target,
+                            form: RefForm::Number,
+                        }),
+                        Inline::text(")"),
+                    ],
+                    attrs: Default::default(),
+                })
+            }
+            "ref" => {
                 let target = self.parse_brace_text();
                 Some(Inline::CrossRef(CrossRef {
                     target,
@@ -1757,7 +1772,9 @@ impl Parser {
                 .unwrap_or(1)
         };
         let colspan = span("\\multicolumn");
-        let rowspan = span("\\multirow");
+        // \multirow leaves an empty cell in the rows it covers, so the span is
+        // not kept: the text sits in the first row and the grid stays intact.
+        let rowspan = 1;
         let inlines = self.parse_cell_text(text);
         TableCell {
             content: if inlines.is_empty() {
