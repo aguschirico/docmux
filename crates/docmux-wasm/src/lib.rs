@@ -231,31 +231,10 @@ pub fn convert_with_files(
     standalone: bool,
 ) -> Result<String, JsError> {
     let reg = build_registry();
-    let is_latex = from == "latex" || from == "tex";
-    if !is_latex && files.size() > 0 {
-        return Err(JsError::new(
-            "convertWithFiles: `files` is only supported when `from` is 'latex' or 'tex'. \
-             For embedding binary resources, use `convertWithResources` instead.",
-        ));
-    }
     let writer = reg
         .find_writer(to)
         .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
-
-    let mut doc = if is_latex {
-        let text_files = js_map_to_text_files(files);
-        docmux_reader_latex::LatexReader::new()
-            .read_with_files(input, &text_files)
-            .map_err(|e| JsError::new(&e.to_string()))?
-    } else {
-        let reader = reg
-            .find_reader(from)
-            .ok_or_else(|| JsError::new(&format!("unsupported input format: {from}")))?;
-        reader
-            .read(input)
-            .map_err(|e| JsError::new(&e.to_string()))?
-    };
-
+    let mut doc = read_with_files(&reg, input, from, files)?;
     doc.resources = js_map_to_resources(resources);
 
     prepare(&mut doc, from, to)?;
@@ -272,6 +251,55 @@ pub fn convert_with_files(
     writer
         .write(&doc, &opts)
         .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Read `input`, giving a LaTeX reader the project's other files.
+fn read_with_files(
+    reg: &Registry,
+    input: &str,
+    from: &str,
+    files: &js_sys::Map,
+) -> Result<docmux_ast::Document, JsError> {
+    let is_latex = from == "latex" || from == "tex";
+    if !is_latex && files.size() > 0 {
+        return Err(JsError::new(
+            "convertWithFiles: `files` is only supported when `from` is 'latex' or 'tex'. \
+             For embedding binary resources, use `convertWithResources` instead.",
+        ));
+    }
+    if is_latex {
+        let text_files = js_map_to_text_files(files);
+        return docmux_reader_latex::LatexReader::new()
+            .read_with_files(input, &text_files)
+            .map_err(|e| JsError::new(&e.to_string()));
+    }
+    let reader = reg
+        .find_reader(from)
+        .ok_or_else(|| JsError::new(&format!("unsupported input format: {from}")))?;
+    reader.read(input).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Convert a project to binary output (e.g. LaTeX + `.bbl` → DOCX). `files`
+/// and `resources` are as in `convertWithFiles`.
+#[wasm_bindgen(js_name = "convertWithFilesToBytes")]
+pub fn convert_with_files_to_bytes(
+    input: &str,
+    from: &str,
+    to: &str,
+    files: &js_sys::Map,
+    resources: &js_sys::Map,
+) -> Result<js_sys::Uint8Array, JsError> {
+    let reg = build_registry();
+    let writer = reg
+        .find_writer(to)
+        .ok_or_else(|| JsError::new(&format!("unsupported output format: {to}")))?;
+    let mut doc = read_with_files(&reg, input, from, files)?;
+    doc.resources = js_map_to_resources(resources);
+    prepare(&mut doc, from, to)?;
+    let bytes = writer
+        .write_bytes(&doc, &WriteOptions::default())
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(js_sys::Uint8Array::from(&bytes[..]))
 }
 
 fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<String, JsError> {

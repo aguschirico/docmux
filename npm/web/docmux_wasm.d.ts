@@ -64,6 +64,12 @@ export function convertToBytes(input: string, from: string, to: string, resource
 export function convertWithFiles(input: string, from: string, to: string, files: Map<any, any>, resources: Map<any, any>, standalone: boolean): string;
 
 /**
+ * Convert a project to binary output (e.g. LaTeX + `.bbl` → DOCX). `files`
+ * and `resources` are as in `convertWithFiles`.
+ */
+export function convertWithFilesToBytes(input: string, from: string, to: string, files: Map<any, any>, resources: Map<any, any>): Uint8Array;
+
+/**
  * Convert text input to string output, with image resources for embedding.
  */
 export function convertWithResources(input: string, from: string, to: string, resources: Map<any, any>): string;
@@ -104,13 +110,14 @@ export interface InitOutput {
     readonly convertStandalone: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly convertToBytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly convertWithFiles: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+    readonly convertWithFilesToBytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly convertWithResources: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly inputFormats: (a: number) => void;
     readonly markdownToHtml: (a: number, b: number, c: number) => void;
     readonly outputFormats: (a: number) => void;
     readonly parseBytesToJson: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly parseToJson: (a: number, b: number, c: number, d: number, e: number) => void;
-    readonly __wasm_bindgen_func_elem_667: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_672: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;

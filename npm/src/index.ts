@@ -6,6 +6,7 @@ import {
   convertWithResources as wasmConvertWithResources,
   convertWithFiles as wasmConvertWithFiles,
   convertToBytes as wasmConvertToBytes,
+  convertWithFilesToBytes as wasmConvertWithFilesToBytes,
   convertBytesToBytes as wasmConvertBytesToBytes,
   parseToJson as wasmParseToJson,
   parseBytesToJson as wasmParseBytesToJson,
@@ -124,6 +125,17 @@ export async function convertToBytes(
   resources: Map<string, Uint8Array>,
 ): Promise<Uint8Array> {
   return wasmConvertToBytes(input, from, to, resources);
+}
+
+/** Like `convertWithFiles`, for binary output formats (DOCX). */
+export async function convertWithFilesToBytes(
+  input: string,
+  from: string,
+  to: string,
+  files: Map<string, Uint8Array>,
+  resources: Map<string, Uint8Array>,
+): Promise<Uint8Array> {
+  return wasmConvertWithFilesToBytes(input, from, to, files, resources);
 }
 
 export async function convertBytesToBytes(

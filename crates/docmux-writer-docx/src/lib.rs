@@ -1107,14 +1107,14 @@ impl Writer for DocxWriter {
         ))
     }
 
-    fn write_bytes(&self, doc: &Document, opts: &WriteOptions) -> Result<Vec<u8>> {
+    fn write_bytes(&self, doc: &Document, _opts: &WriteOptions) -> Result<Vec<u8>> {
         let mut builder = DocxBuilder::new();
         builder.resources = doc.resources.clone();
         // First pass: collect footnote definitions
         builder.collect_footnotes(&doc.content);
-        if opts.standalone {
-            builder.write_metadata(&doc.metadata);
-        }
+        // A .docx is always a whole document, so the title block is always
+        // written; `standalone` does not apply.
+        builder.write_metadata(&doc.metadata);
         builder.write_blocks(&doc.content);
         builder.numbering_xml = builder.build_numbering_xml();
         builder.assemble_zip()

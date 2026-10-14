@@ -285,6 +285,40 @@ export function convertWithFiles(input, from, to, files, resources, standalone) 
 }
 
 /**
+ * Convert a project to binary output (e.g. LaTeX + `.bbl` → DOCX). `files`
+ * and `resources` are as in `convertWithFiles`.
+ * @param {string} input
+ * @param {string} from
+ * @param {string} to
+ * @param {Map<any, any>} files
+ * @param {Map<any, any>} resources
+ * @returns {Uint8Array}
+ */
+export function convertWithFilesToBytes(input, from, to, files, resources) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(from, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(to, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.convertWithFilesToBytes(retptr, ptr0, len0, ptr1, len1, ptr2, len2, addBorrowedObject(files), addBorrowedObject(resources));
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        heap[stack_pointer++] = undefined;
+        heap[stack_pointer++] = undefined;
+    }
+}
+
+/**
  * Convert text input to string output, with image resources for embedding.
  * @param {string} input
  * @param {string} from
@@ -486,7 +520,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return __wasm_bindgen_func_elem_667(a, state0.b, arg0, arg1);
+                        return __wasm_bindgen_func_elem_672(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -526,8 +560,8 @@ function __wbg_get_imports() {
     };
 }
 
-function __wasm_bindgen_func_elem_667(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_667(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_672(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_672(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 function addHeapObject(obj) {
