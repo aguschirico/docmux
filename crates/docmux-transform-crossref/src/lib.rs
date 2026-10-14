@@ -15,7 +15,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 struct ResolvedLabel {
     kind: LabelKind,
-    number: u32,
+    /// Display number: `3`, or `2.1` for sections.
+    number: String,
 }
 
 /// Cross-reference transform.
@@ -53,7 +54,8 @@ struct Counters {
     table: u32,
     equation: u32,
     code: u32,
-    section: u32,
+    /// Hierarchical section counters, one per heading level.
+    sections: [u32; 6],
 }
 
 /// Walk the AST and build a map from label id → resolved info.
@@ -88,7 +90,7 @@ fn collect_labels_from_block(
                 label.clone(),
                 ResolvedLabel {
                     kind: LabelKind::Figure,
-                    number: counters.figure,
+                    number: counters.figure.to_string(),
                 },
             );
         }
@@ -99,7 +101,7 @@ fn collect_labels_from_block(
                     label.clone(),
                     ResolvedLabel {
                         kind: LabelKind::Table,
-                        number: counters.table,
+                        number: counters.table.to_string(),
                     },
                 );
             }
@@ -112,7 +114,7 @@ fn collect_labels_from_block(
                 label.clone(),
                 ResolvedLabel {
                     kind: LabelKind::Equation,
-                    number: counters.equation,
+                    number: counters.equation.to_string(),
                 },
             );
         }
@@ -124,19 +126,38 @@ fn collect_labels_from_block(
                 label.clone(),
                 ResolvedLabel {
                     kind: LabelKind::Code,
-                    number: counters.code,
+                    number: counters.code.to_string(),
                 },
             );
         }
-        Block::Heading { id: Some(id), .. } => {
-            counters.section += 1;
-            map.insert(
-                id.clone(),
-                ResolvedLabel {
-                    kind: LabelKind::Section,
-                    number: counters.section,
-                },
-            );
+        Block::Heading {
+            level, id, attrs, ..
+        } => {
+            let unnumbered = attrs
+                .as_ref()
+                .is_some_and(|a| a.classes.iter().any(|c| c == "unnumbered"));
+            if unnumbered {
+                return;
+            }
+            let idx = usize::from(level.clamp(&1, &6) - 1);
+            counters.sections[idx] += 1;
+            for deeper in counters.sections.iter_mut().skip(idx + 1) {
+                *deeper = 0;
+            }
+            if let Some(id) = id {
+                let number = counters.sections[..=idx]
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(".");
+                map.insert(
+                    id.clone(),
+                    ResolvedLabel {
+                        kind: LabelKind::Section,
+                        number,
+                    },
+                );
+            }
         }
         // Recurse into nested block containers
         Block::BlockQuote { content } => {
@@ -195,6 +216,10 @@ fn resolve_block(block: &mut Block, labels: &HashMap<String, ResolvedLabel>) {
             if let Some(cap) = &mut table.caption {
                 resolve_inlines(cap, labels);
             }
+            let header = table.header.iter_mut().flatten();
+            for cell in header.chain(table.rows.iter_mut().flatten()) {
+                resolve_blocks(&mut cell.content, labels);
+            }
         }
         _ => {}
     }
@@ -211,7 +236,12 @@ fn resolve_inline(inline: &mut Inline, labels: &HashMap<String, ResolvedLabel>) 
         Inline::CrossRef(cr) => {
             if let Some(resolved) = labels.get(&cr.target) {
                 let text = render_crossref(cr, resolved);
-                *inline = Inline::Text { value: text };
+                *inline = Inline::Link {
+                    url: format!("#{}", cr.target),
+                    title: None,
+                    content: vec![Inline::Text { value: text }],
+                    attrs: None,
+                };
             }
             // If unresolved, leave the CrossRef as-is — writers will
             // handle it (e.g. LaTeX writer emits \ref{} which LaTeX resolves)
@@ -236,9 +266,7 @@ fn resolve_inline(inline: &mut Inline, labels: &HashMap<String, ResolvedLabel>) 
 /// Render a cross-reference to text based on its form.
 fn render_crossref(cr: &CrossRef, resolved: &ResolvedLabel) -> String {
     match &cr.form {
-        RefForm::Number => {
-            format!("{}", resolved.number)
-        }
+        RefForm::Number => resolved.number.clone(),
         RefForm::NumberWithType => {
             let type_name = label_kind_name(&resolved.kind);
             format!("{} {}", type_name, resolved.number)
@@ -246,7 +274,7 @@ fn render_crossref(cr: &CrossRef, resolved: &ResolvedLabel) -> String {
         RefForm::Page => {
             // Page references only make sense in paged media (PDF/LaTeX).
             // In non-paged output we fall back to the number.
-            format!("{}", resolved.number)
+            resolved.number.clone()
         }
         RefForm::Custom(text) => {
             format!("{} {}", text, resolved.number)
@@ -327,12 +355,18 @@ mod tests {
         if let Block::Paragraph { content } = &doc.content[2] {
             assert_eq!(content.len(), 5);
             match &content[1] {
-                Inline::Text { value } => assert_eq!(value, "Figure 1"),
-                other => panic!("Expected resolved Text, got {:?}", other),
+                Inline::Link { url, content, .. } => {
+                    assert!(url.starts_with('#'));
+                    assert!(matches!(&content[0], Inline::Text { value } if value == "Figure 1"));
+                }
+                other => panic!("Expected resolved Link, got {:?}", other),
             }
             match &content[3] {
-                Inline::Text { value } => assert_eq!(value, "2"),
-                other => panic!("Expected resolved Text, got {:?}", other),
+                Inline::Link { url, content, .. } => {
+                    assert!(url.starts_with('#'));
+                    assert!(matches!(&content[0], Inline::Text { value } if value == "2"));
+                }
+                other => panic!("Expected resolved Link, got {:?}", other),
             }
         } else {
             panic!("Expected Paragraph");
@@ -389,15 +423,24 @@ mod tests {
 
         if let Block::Paragraph { content } = &doc.content[3] {
             match &content[0] {
-                Inline::Text { value } => assert_eq!(value, "Equation 1"),
+                Inline::Link { url, content, .. } => {
+                    assert!(url.starts_with('#'));
+                    assert!(matches!(&content[0], Inline::Text { value } if value == "Equation 1"));
+                }
                 other => panic!("Expected 'Equation 1', got {:?}", other),
             }
             match &content[2] {
-                Inline::Text { value } => assert_eq!(value, "Table 1"),
+                Inline::Link { url, content, .. } => {
+                    assert!(url.starts_with('#'));
+                    assert!(matches!(&content[0], Inline::Text { value } if value == "Table 1"));
+                }
                 other => panic!("Expected 'Table 1', got {:?}", other),
             }
             match &content[4] {
-                Inline::Text { value } => assert_eq!(value, "Equation 2"),
+                Inline::Link { url, content, .. } => {
+                    assert!(url.starts_with('#'));
+                    assert!(matches!(&content[0], Inline::Text { value } if value == "Equation 2"));
+                }
                 other => panic!("Expected 'Equation 2', got {:?}", other),
             }
         } else {
@@ -460,7 +503,10 @@ mod tests {
 
         if let Block::Paragraph { content } = &doc.content[1] {
             match &content[0] {
-                Inline::Text { value } => assert_eq!(value, "Fig. 1"),
+                Inline::Link { url, content, .. } => {
+                    assert!(url.starts_with('#'));
+                    assert!(matches!(&content[0], Inline::Text { value } if value == "Fig. 1"));
+                }
                 other => panic!("Expected 'Fig. 1', got {:?}", other),
             }
         }
@@ -497,7 +543,12 @@ mod tests {
         if let Block::BlockQuote { content } = &doc.content[1] {
             if let Block::Paragraph { content } = &content[0] {
                 match &content[1] {
-                    Inline::Text { value } => assert_eq!(value, "Equation 1"),
+                    Inline::Link { url, content, .. } => {
+                        assert!(url.starts_with('#'));
+                        assert!(
+                            matches!(&content[0], Inline::Text { value } if value == "Equation 1")
+                        );
+                    }
                     other => panic!("Expected 'Equation 1', got {:?}", other),
                 }
             }
@@ -537,7 +588,12 @@ mod tests {
 
         if let Block::Paragraph { content } = &doc.content[2] {
             match &content[0] {
-                Inline::Text { value } => assert_eq!(value, "Section 2"),
+                Inline::Link { url, content, .. } => {
+                    assert!(url.starts_with('#'));
+                    assert!(
+                        matches!(&content[0], Inline::Text { value } if value == "Section 1.1")
+                    );
+                }
                 other => panic!("Expected 'Section 2', got {:?}", other),
             }
         }

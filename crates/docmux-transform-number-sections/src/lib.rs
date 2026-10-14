@@ -126,7 +126,18 @@ fn number_blocks(blocks: &mut [Block], state: &mut NumberingState) {
 
 fn number_block(block: &mut Block, state: &mut NumberingState) {
     match block {
-        Block::Heading { level, content, .. } => {
+        Block::Heading {
+            level,
+            content,
+            attrs,
+            ..
+        } => {
+            let unnumbered = attrs
+                .as_ref()
+                .is_some_and(|a| a.classes.iter().any(|c| c == "unnumbered"));
+            if unnumbered {
+                return;
+            }
             state.bump(*level);
             let prefix = state.prefix(*level);
             // Prepend "<prefix> " as Text inline.
@@ -305,5 +316,44 @@ mod tests {
     fn transform_trait_metadata() {
         let t = NumberSectionsTransform::new();
         assert_eq!(t.name(), "number-sections");
+    }
+
+    #[test]
+    fn unnumbered_headings_are_skipped() {
+        let mut doc = Document {
+            content: vec![
+                heading(1, "Intro"),
+                Block::Heading {
+                    level: 1,
+                    id: None,
+                    content: vec![Inline::text("References")],
+                    attrs: Some(Attributes {
+                        id: None,
+                        classes: vec!["unnumbered".into()],
+                        key_values: Default::default(),
+                    }),
+                },
+                heading(1, "Appendix"),
+            ],
+            ..Default::default()
+        };
+        NumberSectionsTransform::new()
+            .transform(&mut doc, &TransformContext::default())
+            .unwrap();
+        let texts: Vec<String> = doc
+            .content
+            .iter()
+            .map(|b| match b {
+                Block::Heading { content, .. } => content
+                    .iter()
+                    .map(|i| match i {
+                        Inline::Text { value } => value.as_str(),
+                        _ => "",
+                    })
+                    .collect(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(texts, ["1 Intro", "References", "2 Appendix"]);
     }
 }
