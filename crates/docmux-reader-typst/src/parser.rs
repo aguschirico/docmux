@@ -2817,7 +2817,7 @@ mod tests {
     #[test]
     fn figure_with_table_header_and_label() {
         let input = "#figure(\n  table(\n    columns: 2,\n    table.header([A], [B]),\n    [1], [2],\n    [3], [4],\n  ),\n  caption: [Numbers.],\n) <tab:n>\n";
-        let doc = TypstReader::new().read(input).unwrap();
+        let doc = Parser::new(crate::lexer::tokenize(input), input).parse();
         let Block::Table(table) = &doc.content[0] else {
             panic!("expected table, got {:?}", doc.content);
         };
