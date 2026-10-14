@@ -2,7 +2,7 @@
 //!
 //! Typst writer for docmux. Converts the docmux AST into Typst markup.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use docmux_ast::*;
 use docmux_core::{Result, WriteOptions, Writer};
@@ -16,6 +16,16 @@ fn collect_footnotes(blocks: &[Block]) -> HashMap<String, Vec<Block>> {
         }
     }
     map
+}
+
+/// What the writer needs to know about the whole document while writing
+/// any part of it.
+#[derive(Default)]
+struct Ctx {
+    footnotes: HashMap<String, Vec<Block>>,
+    /// Every label defined in the document. A Typst `@ref` to anything else
+    /// is a compile error, so dangling references are written as text.
+    labels: HashSet<String>,
 }
 
 /// A Typst writer.
@@ -32,23 +42,17 @@ impl TypstWriter {
         blocks: &[Block],
         opts: &WriteOptions,
         out: &mut String,
-        footnotes: &HashMap<String, Vec<Block>>,
+        ctx: &Ctx,
     ) {
         for block in blocks {
-            self.write_block_impl(block, opts, out, footnotes);
+            self.write_block_impl(block, opts, out, ctx);
         }
     }
 
-    fn write_block_impl(
-        &self,
-        block: &Block,
-        opts: &WriteOptions,
-        out: &mut String,
-        footnotes: &HashMap<String, Vec<Block>>,
-    ) {
+    fn write_block_impl(&self, block: &Block, opts: &WriteOptions, out: &mut String, ctx: &Ctx) {
         match block {
             Block::Paragraph { content } => {
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push_str("\n\n");
             }
             Block::Heading {
@@ -58,9 +62,9 @@ impl TypstWriter {
                     out.push('=');
                 }
                 out.push(' ');
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 if let Some(id) = id {
-                    out.push_str(&format!(" <{}>", id));
+                    out.push_str(&format!(" <{}>", typst_label(id)));
                 }
                 out.push('\n');
             }
@@ -75,7 +79,7 @@ impl TypstWriter {
                     out.push_str("#figure(\n");
                     if let Some(cap) = caption {
                         out.push_str("  caption: [");
-                        self.write_inlines_impl(cap, opts, out, footnotes);
+                        self.write_inlines_impl(cap, opts, out, ctx);
                         out.push_str("],\n");
                     }
                     out.push_str(")[\n");
@@ -93,7 +97,7 @@ impl TypstWriter {
                 if caption.is_some() || label.is_some() {
                     out.push(']');
                     if let Some(label) = label {
-                        out.push_str(&format!(" <{}>", label));
+                        out.push_str(&format!(" <{}>", typst_label(label)));
                     }
                     out.push('\n');
                 }
@@ -103,13 +107,13 @@ impl TypstWriter {
                 out.push_str(content.trim());
                 out.push_str("\n$");
                 if let Some(label) = label {
-                    out.push_str(&format!(" <{}>", label));
+                    out.push_str(&format!(" <{}>", typst_label(label)));
                 }
                 out.push('\n');
             }
             Block::BlockQuote { content } => {
                 out.push_str("#quote(block: true)[\n");
-                self.write_blocks_impl(content, opts, out, footnotes);
+                self.write_blocks_impl(content, opts, out, ctx);
                 out.push_str("]\n");
             }
             Block::List {
@@ -135,13 +139,13 @@ impl TypstWriter {
                         out.push_str(marker);
                     }
                     let mut item_content = String::new();
-                    self.write_blocks_impl(&item.content, opts, &mut item_content, footnotes);
+                    self.write_blocks_impl(&item.content, opts, &mut item_content, ctx);
                     out.push_str(item_content.trim());
                     out.push('\n');
                 }
             }
             Block::Table(table) => {
-                self.write_table(table, opts, out, footnotes);
+                self.write_table(table, opts, out, ctx);
             }
             Block::Figure {
                 image,
@@ -150,15 +154,20 @@ impl TypstWriter {
                 ..
             } => {
                 out.push_str("#figure(\n");
-                out.push_str(&format!("  image(\"{}\"),\n", escape_typst_url(&image.url)));
+                if image.url.is_empty() {
+                    // Figures drawn in the source (TikZ, picture) have no file.
+                    out.push_str("  [],\n");
+                } else {
+                    out.push_str(&format!("  image(\"{}\"),\n", escape_typst_url(&image.url)));
+                }
                 if let Some(cap) = caption {
                     out.push_str("  caption: [");
-                    self.write_inlines_impl(cap, opts, out, footnotes);
+                    self.write_inlines_impl(cap, opts, out, ctx);
                     out.push_str("],\n");
                 }
                 out.push(')');
                 if let Some(label) = label {
-                    out.push_str(&format!(" <{}>", label));
+                    out.push_str(&format!(" <{}>", typst_label(label)));
                 }
                 out.push('\n');
             }
@@ -189,29 +198,29 @@ impl TypstWriter {
                 out.push_str("#block(inset: 1em, stroke: 0.5pt)[\n");
                 if let Some(t) = title {
                     out.push('*');
-                    self.write_inlines_impl(t, opts, out, footnotes);
+                    self.write_inlines_impl(t, opts, out, ctx);
                     out.push_str("*\n\n");
                 } else {
                     out.push_str(&format!("*{}*\n\n", label));
                 }
-                self.write_blocks_impl(content, opts, out, footnotes);
+                self.write_blocks_impl(content, opts, out, ctx);
                 out.push_str("]\n");
             }
             Block::DefinitionList { items } => {
                 for item in items {
                     for def in &item.definitions {
                         out.push_str("/ ");
-                        self.write_inlines_impl(&item.term, opts, out, footnotes);
+                        self.write_inlines_impl(&item.term, opts, out, ctx);
                         out.push_str(": ");
                         let mut def_content = String::new();
-                        self.write_blocks_impl(def, opts, &mut def_content, footnotes);
+                        self.write_blocks_impl(def, opts, &mut def_content, ctx);
                         out.push_str(def_content.trim());
                         out.push('\n');
                     }
                 }
             }
             Block::Div { content, .. } => {
-                self.write_blocks_impl(content, opts, out, footnotes);
+                self.write_blocks_impl(content, opts, out, ctx);
             }
             Block::FootnoteDef { .. } => {
                 // Consumed by footnote pre-pass; skip
@@ -224,23 +233,40 @@ impl TypstWriter {
         inlines: &[Inline],
         opts: &WriteOptions,
         out: &mut String,
-        footnotes: &HashMap<String, Vec<Block>>,
+        ctx: &Ctx,
     ) {
-        for inline in inlines {
-            self.write_inline_impl(inline, opts, out, footnotes);
+        for (k, inline) in inlines.iter().enumerate() {
+            // `*` and `_` only delimit at word boundaries in Typst: `*Lo*w`
+            // does not parse. Use the function form when glued to a word.
+            let glued = out.chars().last().is_some_and(char::is_alphanumeric)
+                || inlines.get(k + 1).is_some_and(starts_alphanumeric);
+            match inline {
+                Inline::Strong { content } if glued => {
+                    out.push_str("#strong[");
+                    self.write_inlines_impl(content, opts, out, ctx);
+                    out.push(']');
+                }
+                Inline::Emphasis { content } if glued => {
+                    out.push_str("#emph[");
+                    self.write_inlines_impl(content, opts, out, ctx);
+                    out.push(']');
+                }
+                // `@a-b` would read the `-b` as part of the label.
+                Inline::CrossRef(cr)
+                    if ctx.labels.contains(&cr.target)
+                        && inlines.get(k + 1).is_some_and(starts_label_char) =>
+                {
+                    out.push_str(&format!("#ref(<{}>)", typst_label(&cr.target)));
+                }
+                _ => self.write_inline_impl(inline, opts, out, ctx),
+            }
         }
     }
 
-    fn write_inline_impl(
-        &self,
-        inline: &Inline,
-        opts: &WriteOptions,
-        out: &mut String,
-        footnotes: &HashMap<String, Vec<Block>>,
-    ) {
+    fn write_inline_impl(&self, inline: &Inline, opts: &WriteOptions, out: &mut String, ctx: &Ctx) {
         match inline {
             Inline::Text { value } => {
-                out.push_str(&escape_typst(value));
+                push_text(out, value);
             }
             Inline::SoftBreak => {
                 out.push('\n');
@@ -250,23 +276,28 @@ impl TypstWriter {
             }
             Inline::Emphasis { content } => {
                 out.push('_');
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push('_');
             }
             Inline::Strong { content } => {
                 out.push('*');
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push('*');
             }
             Inline::Strikethrough { content } => {
                 out.push_str("#strike[");
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push(']');
             }
             Inline::Code { value, .. } => {
-                out.push('`');
-                out.push_str(value);
-                out.push('`');
+                if value.contains('`') || value.contains('\n') {
+                    // A backtick inside would close the raw span early.
+                    out.push_str(&format!("#raw(\"{}\")", escape_typst_url(value)));
+                } else {
+                    out.push('`');
+                    out.push_str(value);
+                    out.push('`');
+                }
             }
             Inline::MathInline { value } => {
                 out.push('$');
@@ -277,7 +308,7 @@ impl TypstWriter {
                 out.push_str(&format!("#link(\"{}\")", escape_typst_url(url)));
                 if !content.is_empty() {
                     out.push('[');
-                    self.write_inlines_impl(content, opts, out, footnotes);
+                    self.write_inlines_impl(content, opts, out, ctx);
                     out.push(']');
                 }
             }
@@ -291,26 +322,26 @@ impl TypstWriter {
             }
             Inline::Superscript { content } => {
                 out.push_str("#super[");
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push(']');
             }
             Inline::Subscript { content } => {
                 out.push_str("#sub[");
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push(']');
             }
             Inline::SmallCaps { content } => {
                 out.push_str("#smallcaps[");
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push(']');
             }
             Inline::Underline { content } => {
                 out.push_str("#underline[");
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push(']');
             }
             Inline::Span { content, .. } => {
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
             }
             Inline::RawInline { format, content } => {
                 if format == "typst" || format == "typ" {
@@ -326,8 +357,13 @@ impl TypstWriter {
                     if i > 0 {
                         out.push(' ');
                     }
-                    out.push('@');
-                    out.push_str(&item.key);
+                    if ctx.labels.contains(&item.key) {
+                        out.push('@');
+                        out.push_str(&typst_label(&item.key));
+                    } else {
+                        // No bibliography entry to point at: keep the key visible.
+                        out.push_str(&escape_typst(&format!("[{}]", item.key)));
+                    }
                     if let Some(suffix) = &item.suffix {
                         out.push(' ');
                         out.push_str(&escape_typst(suffix));
@@ -335,14 +371,19 @@ impl TypstWriter {
                 }
             }
             Inline::CrossRef(cr) => {
-                out.push('@');
-                out.push_str(&cr.target);
+                if ctx.labels.contains(&cr.target) {
+                    out.push('@');
+                    out.push_str(&typst_label(&cr.target));
+                } else {
+                    // What LaTeX prints for an undefined reference.
+                    out.push_str("??");
+                }
             }
             Inline::FootnoteRef { id } => {
-                if let Some(content) = footnotes.get(id) {
+                if let Some(content) = ctx.footnotes.get(id) {
                     out.push_str("#footnote[");
                     let mut inner = String::new();
-                    self.write_blocks_impl(content, opts, &mut inner, footnotes);
+                    self.write_blocks_impl(content, opts, &mut inner, ctx);
                     out.push_str(inner.trim());
                     out.push(']');
                 }
@@ -356,7 +397,7 @@ impl TypstWriter {
                     QuoteType::DoubleQuote => ('\u{201C}', '\u{201D}'),
                 };
                 out.push(open);
-                self.write_inlines_impl(content, opts, out, footnotes);
+                self.write_inlines_impl(content, opts, out, ctx);
                 out.push(close);
             }
         }
@@ -364,19 +405,13 @@ impl TypstWriter {
 
     // ── Table helper ─────────────────────────────────────────────────────
 
-    fn write_table(
-        &self,
-        table: &Table,
-        opts: &WriteOptions,
-        out: &mut String,
-        footnotes: &HashMap<String, Vec<Block>>,
-    ) {
+    fn write_table(&self, table: &Table, opts: &WriteOptions, out: &mut String, ctx: &Ctx) {
         let has_wrapper = table.caption.is_some() || table.label.is_some();
         if has_wrapper {
             out.push_str("#figure(\n");
             if let Some(cap) = &table.caption {
                 out.push_str("  caption: [");
-                self.write_inlines_impl(cap, opts, out, footnotes);
+                self.write_inlines_impl(cap, opts, out, ctx);
                 out.push_str("],\n");
             }
         }
@@ -388,7 +423,8 @@ impl TypstWriter {
                 .or_else(|| table.rows.first().map(|r| r.len()))
                 .unwrap_or(1),
         );
-        out.push_str(&format!("#table(\n  columns: {},\n", ncols));
+        let hash = if has_wrapper { "" } else { "#" };
+        out.push_str(&format!("{hash}table(\n  columns: {ncols},\n"));
 
         if table
             .columns
@@ -414,7 +450,7 @@ impl TypstWriter {
             for cell in header {
                 out.push_str("    [");
                 let mut cell_content = String::new();
-                self.write_blocks_impl(&cell.content, opts, &mut cell_content, footnotes);
+                self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
                 out.push_str(cell_content.trim());
                 out.push_str("],\n");
             }
@@ -425,7 +461,7 @@ impl TypstWriter {
             for cell in row {
                 out.push_str("  [");
                 let mut cell_content = String::new();
-                self.write_blocks_impl(&cell.content, opts, &mut cell_content, footnotes);
+                self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
                 out.push_str(cell_content.trim());
                 out.push_str("],\n");
             }
@@ -436,7 +472,7 @@ impl TypstWriter {
             for cell in foot {
                 out.push_str("    [");
                 let mut cell_content = String::new();
-                self.write_blocks_impl(&cell.content, opts, &mut cell_content, footnotes);
+                self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
                 out.push_str(cell_content.trim());
                 out.push_str("],\n");
             }
@@ -447,7 +483,7 @@ impl TypstWriter {
         if has_wrapper {
             out.push(')');
             if let Some(label) = &table.label {
-                out.push_str(&format!(" <{}>", label));
+                out.push_str(&format!(" <{}>", typst_label(label)));
             }
         }
         out.push('\n');
@@ -503,7 +539,7 @@ impl TypstWriter {
                 abstract_blocks,
                 &opts_default,
                 &mut preamble,
-                &HashMap::new(),
+                &Ctx::default(),
             );
             preamble.push_str("]\n\n");
         }
@@ -523,9 +559,15 @@ impl Writer for TypstWriter {
     }
 
     fn write(&self, doc: &Document, opts: &WriteOptions) -> Result<String> {
-        let footnotes = collect_footnotes(&doc.content);
+        let mut labels = Vec::new();
+        collect_labels(&doc.content, &mut labels);
+        let ctx = Ctx {
+            footnotes: collect_footnotes(&doc.content),
+            labels: labels.iter().map(|(_, l)| l.clone()).collect(),
+        };
         let mut body = String::with_capacity(4096);
-        self.write_blocks_impl(&doc.content, opts, &mut body, &footnotes);
+        body.push_str(&numbering_rules(&doc.content, &labels));
+        self.write_blocks_impl(&doc.content, opts, &mut body, &ctx);
 
         if opts.standalone {
             Ok(self.wrap_standalone(&body, doc))
@@ -535,21 +577,199 @@ impl Writer for TypstWriter {
     }
 }
 
+fn starts_label_char(inline: &Inline) -> bool {
+    matches!(inline, Inline::Text { value } if value.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-'))
+}
+
+fn starts_alphanumeric(inline: &Inline) -> bool {
+    matches!(inline, Inline::Text { value } if value.chars().next().is_some_and(char::is_alphanumeric))
+}
+
+// ─── Numbering ───────────────────────────────────────────────────────────────
+
+/// Typst refuses `@label` on headings and equations unless they are numbered.
+/// Turn numbering on for the kinds of element the document cross-references.
+fn numbering_rules(blocks: &[Block], labels: &[(LabelKind, String)]) -> String {
+    let mut targets = Vec::new();
+    collect_ref_targets(blocks, &mut targets);
+    let referenced = |kind: LabelKind| {
+        labels
+            .iter()
+            .any(|(k, l)| *k == kind && targets.contains(l))
+    };
+    let mut rules = String::new();
+    if referenced(LabelKind::Heading) {
+        // Number three levels like LaTeX's article; `\\paragraph` stays unnumbered.
+        rules.push_str(
+            "#set heading(numbering: (..n) => if n.pos().len() <= 3 { numbering(\"1.1\", ..n) })\n",
+        );
+    }
+    if referenced(LabelKind::Equation) {
+        rules.push_str("#set math.equation(numbering: \"(1)\")\n");
+    }
+    if !rules.is_empty() {
+        rules.push('\n');
+    }
+    rules
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum LabelKind {
+    Heading,
+    Equation,
+    Other,
+}
+
+/// Every label the writer emits, with the kind of element it is attached to.
+fn collect_labels(blocks: &[Block], out: &mut Vec<(LabelKind, String)>) {
+    for block in blocks {
+        match block {
+            Block::Heading { id: Some(id), .. } => out.push((LabelKind::Heading, id.clone())),
+            Block::MathBlock {
+                label: Some(label), ..
+            } => out.push((LabelKind::Equation, label.clone())),
+            Block::Figure {
+                label: Some(label), ..
+            }
+            | Block::CodeBlock {
+                label: Some(label), ..
+            } => out.push((LabelKind::Other, label.clone())),
+            Block::Table(table) => {
+                if let Some(label) = &table.label {
+                    out.push((LabelKind::Other, label.clone()));
+                }
+            }
+            Block::BlockQuote { content }
+            | Block::Div { content, .. }
+            | Block::Admonition { content, .. } => collect_labels(content, out),
+            Block::List { items, .. } => {
+                for item in items {
+                    collect_labels(&item.content, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_ref_targets(blocks: &[Block], out: &mut Vec<String>) {
+    for block in blocks {
+        match block {
+            Block::Paragraph { content } | Block::Heading { content, .. } => {
+                collect_inline_targets(content, out)
+            }
+            Block::BlockQuote { content }
+            | Block::Div { content, .. }
+            | Block::Admonition { content, .. }
+            | Block::FootnoteDef { content, .. } => collect_ref_targets(content, out),
+            Block::List { items, .. } => {
+                for item in items {
+                    collect_ref_targets(&item.content, out);
+                }
+            }
+            Block::Figure {
+                caption: Some(caption),
+                ..
+            } => collect_inline_targets(caption, out),
+            Block::Table(table) => {
+                let cells = table
+                    .header
+                    .iter()
+                    .flatten()
+                    .chain(table.rows.iter().flatten());
+                for cell in cells {
+                    collect_ref_targets(&cell.content, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_inline_targets(inlines: &[Inline], out: &mut Vec<String>) {
+    for inline in inlines {
+        match inline {
+            Inline::CrossRef(cr) => out.push(cr.target.clone()),
+            Inline::Emphasis { content }
+            | Inline::Strong { content }
+            | Inline::Strikethrough { content }
+            | Inline::Underline { content }
+            | Inline::Superscript { content }
+            | Inline::Subscript { content }
+            | Inline::SmallCaps { content }
+            | Inline::Link { content, .. }
+            | Inline::Span { content, .. }
+            | Inline::Quoted { content, .. } => collect_inline_targets(content, out),
+            _ => {}
+        }
+    }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Escape Typst special characters: \ * _ ` $ # @ < >
+/// Escape Typst special characters: \\ * _ ` $ # @ < > [ ] and the `//` / `/*`
+/// comment openers.
 pub fn escape_typst(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
         match c {
-            '\\' | '*' | '_' | '`' | '$' | '#' | '@' | '<' | '>' => {
+            '\\' | '*' | '_' | '`' | '$' | '#' | '@' | '<' | '>' | '[' | ']' => {
                 out.push('\\');
                 out.push(c);
             }
+            '/' if matches!(chars.peek(), Some('/' | '*')) => out.push_str("\\/"),
             _ => out.push(c),
         }
     }
     out
+}
+
+/// Append escaped text, also escaping markers that Typst only interprets at
+/// the start of a line (`- `, `+ `, `= `, `/ `, `1. `).
+fn push_text(out: &mut String, value: &str) {
+    let escaped = escape_typst(value);
+    if !(out.is_empty() || out.ends_with('\n')) {
+        out.push_str(&escaped);
+        return;
+    }
+    match line_marker_pos(&escaped) {
+        Some(pos) => {
+            out.push_str(&escaped[..pos]);
+            out.push('\\');
+            out.push_str(&escaped[pos..]);
+        }
+        None => out.push_str(&escaped),
+    }
+}
+
+/// Byte offset of the character that would turn this line into a list item,
+/// heading or term (the `-`, `+`, `=`, `/` or the `.` after digits).
+fn line_marker_pos(s: &str) -> Option<usize> {
+    let indent = s.len() - s.trim_start_matches(' ').len();
+    let rest = &s[indent..];
+    let marker_end = |i: usize| matches!(rest[i..].chars().next(), None | Some(' ' | '\n'));
+    if rest.starts_with(['-', '+', '=', '/']) && marker_end(1) {
+        return Some(indent);
+    }
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    (digits > 0 && rest[digits..].starts_with('.') && marker_end(digits + 1))
+        .then_some(indent + digits)
+}
+
+/// Turn an arbitrary identifier into a valid Typst label / reference name.
+/// Typst labels allow letters, digits, `_`, `-`, `:` and `.`; anything else
+/// becomes `-`. Applied to both definitions and references so they match.
+pub fn typst_label(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '_' | '-' | ':' | '.') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// Escape characters inside a Typst URL string literal: \ and "
@@ -869,7 +1089,9 @@ mod tests {
             ..Default::default()
         };
         let typ = write_typst(&doc);
-        assert!(typ.contains("#table("));
+        // Inside `#figure(` we are in code mode: `table(` must not carry `#`.
+        assert!(typ.contains("#figure(\n  caption: [Results],\ntable("));
+        assert!(!typ.contains("#table("));
         assert!(typ.contains("columns: 2"));
         assert!(typ.contains("[Name]"));
         assert!(typ.contains("[Pi]"));
@@ -927,5 +1149,253 @@ mod tests {
         assert!(typ.contains("title: \"My Paper\""));
         assert!(typ.contains("Jane Doe"));
         assert!(typ.contains("Body text."));
+    }
+
+    #[test]
+    fn bare_table_keeps_hash() {
+        let doc = Document {
+            content: vec![Block::Table(Table {
+                caption: None,
+                label: None,
+                columns: vec![],
+                header: None,
+                rows: vec![vec![TableCell {
+                    content: vec![Block::text("x")],
+                    colspan: 1,
+                    rowspan: 1,
+                }]],
+                foot: None,
+                attrs: None,
+            })],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).starts_with("#table("));
+    }
+
+    #[test]
+    fn labels_with_spaces_are_sanitized_on_both_ends() {
+        let doc = Document {
+            content: vec![
+                Block::Figure {
+                    image: Image {
+                        url: "a.png".into(),
+                        alt: vec![],
+                        title: None,
+                        attrs: None,
+                    },
+                    caption: None,
+                    label: Some("figure:eval strategies".into()),
+                    attrs: None,
+                },
+                Block::Paragraph {
+                    content: vec![Inline::CrossRef(CrossRef {
+                        target: "figure:eval strategies".into(),
+                        form: RefForm::Number,
+                    })],
+                },
+            ],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("<figure:eval-strategies>"));
+        assert!(typ.contains("@figure:eval-strategies"));
+    }
+
+    #[test]
+    fn dangling_references_are_written_as_text() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::CrossRef(CrossRef {
+                        target: "sec:missing".into(),
+                        form: RefForm::Number,
+                    }),
+                    Inline::text(" "),
+                    Inline::Citation(Citation {
+                        items: vec![CiteItem {
+                            key: "smith2020".into(),
+                            prefix: None,
+                            suffix: None,
+                        }],
+                        mode: CitationMode::Normal,
+                    }),
+                ],
+            }],
+            ..Default::default()
+        };
+        assert_eq!(write_typst(&doc).trim(), "?? \\[smith2020\\]");
+    }
+
+    #[test]
+    fn brackets_and_comment_openers_are_escaped() {
+        assert_eq!(escape_typst("a ] b [c"), "a \\] b \\[c");
+        assert_eq!(escape_typst("x // y /* z"), "x \\// y \\/\\* z");
+        assert_eq!(escape_typst("http:/x a/b"), "http:/x a/b");
+    }
+
+    #[test]
+    fn line_start_markers_are_escaped() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::text("intro"),
+                    Inline::SoftBreak,
+                    Inline::text("- not a list, 2. not an enum"),
+                    Inline::SoftBreak,
+                    Inline::text("12. also not"),
+                    Inline::SoftBreak,
+                    Inline::text("= not a heading"),
+                    Inline::SoftBreak,
+                    Inline::text("-5 degrees is fine"),
+                ],
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("\n\\- not a list, 2. not an enum\n"));
+        assert!(typ.contains("\n12\\. also not\n"));
+        assert!(typ.contains("\n\\= not a heading\n"));
+        assert!(typ.contains("\n-5 degrees is fine"));
+    }
+
+    #[test]
+    fn referenced_headings_and_equations_get_numbering() {
+        let doc = Document {
+            content: vec![
+                Block::Heading {
+                    level: 1,
+                    id: Some("sec:intro".into()),
+                    content: vec![Inline::text("Intro")],
+                    attrs: None,
+                },
+                Block::MathBlock {
+                    content: "x".into(),
+                    label: Some("eq:x".into()),
+                },
+                Block::Paragraph {
+                    content: vec![
+                        Inline::CrossRef(CrossRef {
+                            target: "sec:intro".into(),
+                            form: RefForm::Number,
+                        }),
+                        Inline::CrossRef(CrossRef {
+                            target: "eq:x".into(),
+                            form: RefForm::Number,
+                        }),
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.starts_with(
+            "#set heading(numbering: (..n) => if n.pos().len() <= 3 { numbering(\"1.1\", ..n) })\n#set math.equation(numbering: \"(1)\")\n"
+        ));
+    }
+
+    #[test]
+    fn unreferenced_document_has_no_numbering_rules() {
+        let doc = Document {
+            content: vec![Block::Heading {
+                level: 1,
+                id: Some("sec:intro".into()),
+                content: vec![Inline::text("Intro")],
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).starts_with("= Intro"));
+    }
+
+    #[test]
+    fn figure_without_image_file() {
+        let doc = Document {
+            content: vec![Block::Figure {
+                image: Image {
+                    url: String::new(),
+                    alt: vec![],
+                    title: None,
+                    attrs: None,
+                },
+                caption: Some(vec![Inline::text("A TikZ drawing")]),
+                label: None,
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let typ = write_typst(&doc);
+        assert!(typ.contains("#figure(\n  [],\n"));
+        assert!(!typ.contains("image(\"\")"));
+    }
+
+    #[test]
+    fn inline_code_with_backtick_uses_raw_function() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Code {
+                    value: "`She' refers".into(),
+                    attrs: None,
+                }],
+            }],
+            ..Default::default()
+        };
+        assert_eq!(write_typst(&doc).trim(), "#raw(\"`She' refers\")");
+    }
+
+    #[test]
+    fn strong_glued_to_a_word_uses_function_form() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::Strong {
+                        content: vec![Inline::text("Lo")],
+                    },
+                    Inline::text("w-"),
+                    Inline::Strong {
+                        content: vec![Inline::text("R")],
+                    },
+                    Inline::text("ank and "),
+                    Inline::Strong {
+                        content: vec![Inline::text("free")],
+                    },
+                    Inline::text(" text"),
+                ],
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            write_typst(&doc).trim(),
+            "#strong[Lo]w-#strong[R]ank and *free* text"
+        );
+    }
+
+    #[test]
+    fn reference_followed_by_label_char_uses_function_form() {
+        let doc = Document {
+            content: vec![
+                Block::Heading {
+                    level: 2,
+                    id: Some("sec:a".into()),
+                    content: vec![Inline::text("A")],
+                    attrs: None,
+                },
+                Block::Paragraph {
+                    content: vec![
+                        Inline::CrossRef(CrossRef {
+                            target: "sec:a".into(),
+                            form: RefForm::Number,
+                        }),
+                        Inline::text("-"),
+                        Inline::CrossRef(CrossRef {
+                            target: "sec:a".into(),
+                            form: RefForm::Number,
+                        }),
+                        Inline::text(" below."),
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).contains("#ref(<sec:a>)-@sec:a below."));
     }
 }
