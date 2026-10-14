@@ -44,6 +44,7 @@ impl MarkdownReader {
         opts.extension.table = true;
         opts.extension.autolink = true;
         opts.extension.tasklist = true;
+        opts.extension.alerts = true;
         opts.extension.footnotes = true;
         opts.extension.description_lists = true;
         opts.extension.math_dollars = true;
@@ -241,6 +242,24 @@ impl MarkdownReader {
                 let content = self.convert_node(node);
                 Some(Block::BlockQuote { content })
             }
+            // GitHub alerts: `> [!NOTE]`.
+            NodeValue::Alert(alert) => {
+                use comrak::nodes::AlertType;
+                let kind = match alert.alert_type {
+                    AlertType::Note => AdmonitionKind::Note,
+                    AlertType::Tip => AdmonitionKind::Tip,
+                    AlertType::Important => AdmonitionKind::Important,
+                    AlertType::Warning => AdmonitionKind::Warning,
+                    AlertType::Caution => AdmonitionKind::Caution,
+                };
+                let title = alert.title.as_ref().map(|t| vec![Inline::text(t.clone())]);
+                let content = self.convert_node(node);
+                Some(Block::Admonition {
+                    kind,
+                    title,
+                    content,
+                })
+            }
             NodeValue::List(list) => {
                 let ordered = matches!(list.list_type, comrak::nodes::ListType::Ordered);
                 let start = if ordered {
@@ -252,11 +271,10 @@ impl MarkdownReader {
                     .children()
                     .map(|item| {
                         let ast = item.data.borrow();
-                        let checked = if let NodeValue::TaskItem(Some(c)) = &ast.value {
-                            // comrak uses char for task items; 'x' or 'X' means checked
-                            Some(*c == 'x' || *c == 'X')
-                        } else {
-                            None
+                        // comrak: TaskItem(None) is `[ ]`, TaskItem(Some('x')) is `[x]`.
+                        let checked = match &ast.value {
+                            NodeValue::TaskItem(c) => Some(matches!(c, Some('x' | 'X'))),
+                            _ => None,
                         };
                         ListItem {
                             checked,
@@ -2505,5 +2523,24 @@ mod tests {
             }
             other => panic!("expected Image, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn github_alerts_and_unchecked_tasks() {
+        let doc = MarkdownReader::new()
+            .read("> [!WARNING]\n> Careful.\n\n- [ ] todo\n- [x] done\n")
+            .unwrap();
+        assert!(matches!(
+            &doc.content[0],
+            Block::Admonition {
+                kind: AdmonitionKind::Warning,
+                ..
+            }
+        ));
+        let Block::List { items, .. } = &doc.content[1] else {
+            panic!("expected list, got {:?}", doc.content[1]);
+        };
+        assert_eq!(items[0].checked, Some(false));
+        assert_eq!(items[1].checked, Some(true));
     }
 }
