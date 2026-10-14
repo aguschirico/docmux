@@ -95,8 +95,11 @@ fn consume_backslash(chars: &[char], pos: &mut usize, tokens: &mut Vec<Token>) {
             body,
         });
     } else {
+        let takes_optional = matches!(name.as_str(), "sqrt" | "\\" | "xrightarrow" | "xleftarrow");
         tokens.push(Token::Command(name));
-        maybe_consume_optional_arg(chars, pos, tokens);
+        if takes_optional {
+            maybe_consume_optional_arg(chars, pos, tokens);
+        }
     }
 }
 
@@ -109,11 +112,22 @@ fn flush_text(buf: &mut String, tokens: &mut Vec<Token>) {
     }
 }
 
-/// Consume a command name (letters only) starting at `pos`.
+/// Consume a command name starting at `pos`: a run of letters (`\\alpha`), or
+/// a single non-letter for control symbols (`\\{`, `\\,`, `\\\\`).
+/// `\\operatorname*` keeps its star.
 fn consume_command_name(chars: &[char], pos: &mut usize) -> String {
     let mut name = String::new();
     while *pos < chars.len() && chars[*pos].is_ascii_alphabetic() {
         name.push(chars[*pos]);
+        *pos += 1;
+    }
+    if name.is_empty() {
+        if let Some(&c) = chars.get(*pos) {
+            name.push(c);
+            *pos += 1;
+        }
+    } else if name == "operatorname" && chars.get(*pos) == Some(&'*') {
+        name.push('*');
         *pos += 1;
     }
     name
@@ -257,6 +271,37 @@ mod tests {
                 Token::Command("sqrt".into()),
                 Token::OptionalArg("3".into()),
                 Token::BraceGroup(vec![Token::Text("x".into())]),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_control_symbols() {
+        let tokens = tokenize_latex(r"\{a\,b\\c\}");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Command("{".into()),
+                Token::Text("a".into()),
+                Token::Command(",".into()),
+                Token::Text("b".into()),
+                Token::Command("\\".into()),
+                Token::Text("c".into()),
+                Token::Command("}".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn optional_arg_only_after_commands_that_take_one() {
+        let tokens = tokenize_latex(r"\left[x\right]");
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Command("left".into()),
+                Token::Text("[x".into()),
+                Token::Command("right".into()),
+                Token::Text("]".into()),
             ]
         );
     }

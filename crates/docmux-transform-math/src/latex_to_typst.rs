@@ -1,7 +1,18 @@
 //! LaTeX → Typst math notation converter.
 //!
-//! Tokenizes a LaTeX math string and walks the token list, converting each
-//! token into its Typst equivalent using the mapping tables.
+//! Tokenizes a LaTeX math string and walks the token list, emitting Typst
+//! math. Typst parses math differently from LaTeX in ways that break real
+//! documents if the conversion is purely textual:
+//!
+//! - a run of letters is one identifier (`xy` is the variable `xy`), so
+//!   letters are emitted as separate atoms (`x y`);
+//! - `name(` starts a function call whose arguments are separated by `,` and
+//!   `;`, so content placed inside generated calls escapes them, and
+//!   unbalanced delimiters inside a call are escaped too;
+//! - a sub/superscript needs a base and a single (or parenthesized) argument,
+//!   so empty bases become `""` and multi-token scripts are wrapped in `(…)`.
+//!
+//! Unknown commands become `op("name")`, which always compiles.
 
 use crate::tables::{
     LATEX_ENV_TO_TYPST, LATEX_TO_TYPST_COMMANDS, LATEX_TO_TYPST_FUNCTIONS, MATHBB_TO_TYPST,
@@ -10,241 +21,743 @@ use crate::tokenizer::{tokenize_latex, Token};
 
 /// Convert a LaTeX math string to Typst math notation.
 pub fn latex_to_typst(input: &str) -> String {
-    let tokens = tokenize_latex(input);
-    tokens_to_typst(&tokens)
+    let converted = convert(&tokenize_latex(input), false);
+    let mut out = converted.trim();
+    // A trailing `\\` would become a dangling `\` that escapes the closing `$`.
+    while let Some(rest) = out.strip_suffix('\\') {
+        out = rest.trim_end();
+    }
+    out.to_string()
 }
 
-/// Walk a slice of tokens and produce the Typst string.
-fn tokens_to_typst(tokens: &[Token]) -> String {
-    let mut out = String::new();
+/// Convert a token slice. `in_call` is true when the result will sit inside
+/// the argument list of a generated Typst function call.
+fn convert(tokens: &[Token], in_call: bool) -> String {
+    let tokens = split_text(tokens);
+    let mut emitter = Emitter {
+        out: String::new(),
+        in_call,
+    };
     let mut i = 0;
     while i < tokens.len() {
-        match &tokens[i] {
-            Token::Command(name) => {
-                out.push_str(&convert_command(name, tokens, &mut i));
-            }
-            Token::Text(t) => {
-                out.push_str(t);
-                i += 1;
-            }
-            Token::SubScript => {
-                out.push('_');
-                i += 1;
-            }
-            Token::SuperScript => {
-                out.push('^');
-                i += 1;
-            }
-            Token::BraceGroup(inner) => {
-                out.push_str(&tokens_to_typst(inner));
-                i += 1;
-            }
-            Token::OptionalArg(arg) => {
-                // Standalone optional arg (shouldn't normally appear without a command).
-                out.push('[');
-                out.push_str(arg);
-                out.push(']');
-                i += 1;
-            }
-            Token::Environment { name, body } => {
-                out.push_str(&convert_environment(name, body));
-                i += 1;
-            }
+        emitter.token(&tokens, &mut i);
+    }
+    emitter.out
+}
+
+/// Split `Text` tokens into units: one letter, one number, or one other
+/// character. Whitespace is dropped (it has no meaning in LaTeX math).
+fn split_text(tokens: &[Token]) -> Vec<Token> {
+    let mut out = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        match token {
+            Token::Text(t) => out.extend(text_units(t).into_iter().map(Token::Text)),
+            other => out.push(other.clone()),
         }
     }
     out
 }
 
-/// Handle a command token, consuming additional brace-group arguments as needed.
-///
-/// `i` points at the command token on entry and is advanced past all consumed
-/// tokens on exit.
-fn convert_command(name: &str, tokens: &[Token], i: &mut usize) -> String {
-    *i += 1; // skip the Command token itself
-
-    match name {
-        "frac" => convert_frac(tokens, i),
-        "sqrt" => convert_sqrt(tokens, i),
-        "text" => convert_text(tokens, i),
-        "mathbb" => convert_mathbb(tokens, i),
-        _ if LATEX_TO_TYPST_FUNCTIONS.contains_key(name) => convert_function(name, tokens, i),
-        _ if LATEX_TO_TYPST_COMMANDS.contains_key(name) => {
-            let typst = LATEX_TO_TYPST_COMMANDS[name];
-            typst.to_string()
+fn text_units(t: &str) -> Vec<String> {
+    let chars: Vec<char> = t.chars().collect();
+    let mut units = Vec::new();
+    let mut k = 0;
+    while k < chars.len() {
+        let start = k;
+        if chars[k].is_ascii_digit() {
+            while k < chars.len()
+                && (chars[k].is_ascii_digit()
+                    || (chars[k] == '.' && chars.get(k + 1).is_some_and(char::is_ascii_digit)))
+            {
+                k += 1;
+            }
+        } else {
+            k += 1;
         }
-        _ => format!("\\{name}"),
+        if !chars[start].is_whitespace() {
+            units.push(chars[start..k].iter().collect());
+        }
+    }
+    units
+}
+
+struct Emitter {
+    out: String,
+    in_call: bool,
+}
+
+impl Emitter {
+    fn token(&mut self, tokens: &[Token], i: &mut usize) {
+        let token = &tokens[*i];
+        *i += 1;
+        match token {
+            Token::Command(name) => {
+                let s = command(name, tokens, i, self.in_call);
+                self.atom(&s);
+            }
+            Token::Text(unit) => self.unit(unit),
+            Token::SubScript => self.script('_', tokens, i),
+            Token::SuperScript => self.script('^', tokens, i),
+            Token::BraceGroup(inner) => {
+                let s = convert(inner, self.in_call);
+                self.atom(&s);
+            }
+            Token::OptionalArg(arg) => {
+                let s = convert(&tokenize_latex(&format!("[{arg}]")), self.in_call);
+                self.atom(&s);
+            }
+            Token::Environment { name, body } => {
+                let s = environment(name, body);
+                self.atom(&s);
+            }
+        }
+    }
+
+    /// Append a converted atom, inserting a space when it would otherwise
+    /// fuse with the previous one (`x` `y` → `x y`, not the identifier `xy`).
+    fn atom(&mut self, s: &str) {
+        let Some(first) = s.chars().next() else {
+            return;
+        };
+        let last = self.out.chars().last();
+        let fuses = last.is_some_and(|c| c.is_alphanumeric() || matches!(c, '.' | '"' | ')'))
+            && (first.is_alphanumeric() || first == '"');
+        if fuses || last.is_some_and(|c| matches!(c, '&' | '=' | '+' | '<' | '>')) {
+            self.out.push(' ');
+        }
+        self.out.push_str(s);
+    }
+
+    /// Append a binary operator or alignment mark with spaces around it, for
+    /// readable output (`a &= b + c`).
+    fn spaced(&mut self, c: char) {
+        let last = self.out.chars().last();
+        let glued = c == '=' && last == Some('&');
+        if !glued && last.is_some_and(|l| !l.is_whitespace() && !"([{".contains(l)) {
+            self.out.push(' ');
+        }
+        self.out.push(c);
+    }
+
+    /// Append one text unit (a letter, a number or a single character).
+    fn unit(&mut self, unit: &str) {
+        let mut chars = unit.chars();
+        let (Some(c), None) = (chars.next(), chars.next()) else {
+            self.atom(unit);
+            return;
+        };
+        match c {
+            '\'' => self.out.push('\''),
+            '/' => self.out.push_str("\\/"),
+            '#' | '$' | '"' | '@' => {
+                self.out.push('\\');
+                self.out.push(c);
+            }
+            ',' | ';' => {
+                if self.in_call {
+                    self.out.push('\\');
+                }
+                self.out.push(c);
+                self.out.push(' ');
+            }
+            '&' | '=' | '+' | '<' | '>' => self.spaced(c),
+            '~' => self.atom("space"),
+            c if c.is_alphanumeric() => self.atom(unit),
+            _ => self.out.push(c),
+        }
+    }
+
+    fn script(&mut self, op: char, tokens: &[Token], i: &mut usize) {
+        let kept = self.out.trim_end().len();
+        self.out.truncate(kept);
+        if needs_base(&self.out) {
+            self.out.push_str("\"\"");
+        }
+        self.out.push(op);
+        self.out.push_str(&script_arg(tokens, i));
     }
 }
 
-/// `\frac{num}{den}` → `(num)/(den)`
-fn convert_frac(tokens: &[Token], i: &mut usize) -> String {
-    let num = consume_brace_arg(tokens, i);
-    let den = consume_brace_arg(tokens, i);
-    format!("({num})/({den})")
+/// True when a `_`/`^` here would have nothing to attach to in Typst.
+fn needs_base(out: &str) -> bool {
+    match out.chars().last() {
+        None => true,
+        Some(c) => matches!(c, '(' | '[' | '{' | '&' | ',' | ';' | '\n'),
+    }
 }
 
-/// `\sqrt{x}` → `sqrt(x)`, `\sqrt[n]{x}` → `root(n, x)`
-fn convert_sqrt(tokens: &[Token], i: &mut usize) -> String {
-    let opt = consume_optional_arg(tokens, i);
-    let body = consume_brace_arg(tokens, i);
-    match opt {
+/// The argument of a sub/superscript: one token, grouped if needed.
+fn script_arg(tokens: &[Token], i: &mut usize) -> String {
+    let Some(token) = tokens.get(*i) else {
+        return "\"\"".into();
+    };
+    *i += 1;
+    let s = match token {
+        Token::BraceGroup(inner) => convert(inner, false),
+        Token::Text(_) => convert(std::slice::from_ref(token), false),
+        Token::Command(name) => command(name, tokens, i, false),
+        Token::Environment { name, body } => environment(name, body),
+        Token::SubScript | Token::SuperScript | Token::OptionalArg(_) => {
+            *i -= 1;
+            String::new()
+        }
+    };
+    group(&s)
+}
+
+/// Wrap a script argument in parentheses unless it is a single atom.
+fn group(s: &str) -> String {
+    let s = s.trim();
+    if s.is_empty() {
+        "\"\"".into()
+    } else if s.chars().all(|c| c.is_alphanumeric() || c == '.') {
+        s.to_string()
+    } else {
+        format!("({})", balance(s))
+    }
+}
+
+// ─── Commands ───────────────────────────────────────────────────────────────
+
+/// Convert a command token (already consumed) and its arguments.
+fn command(name: &str, tokens: &[Token], i: &mut usize, in_call: bool) -> String {
+    if name == "\\" || name == "newline" {
+        if matches!(tokens.get(*i), Some(Token::OptionalArg(_))) {
+            *i += 1;
+        }
+        return " \\\n".into();
+    }
+    if let Some(sym) = control_symbol(name) {
+        return sym.to_string();
+    }
+    if let Some(sym) = LATEX_TO_TYPST_COMMANDS.get(name) {
+        return (*sym).to_string();
+    }
+    structural(name, tokens, i)
+        .or_else(|| text_command(name, tokens, i))
+        .or_else(|| font(name, tokens, i))
+        .or_else(|| decoration(name, tokens, i))
+        .or_else(|| ignored(name, tokens, i, in_call))
+        .unwrap_or_else(|| format!("op(\"{name}\")"))
+}
+
+/// Control symbols: `\{`, `\,`, `\|`, …
+fn control_symbol(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "{" => "{",
+        "}" => "}",
+        "|" => "||",
+        "%" => "%",
+        "$" => "\\$",
+        "#" => "\\#",
+        "&" => "\\&",
+        "_" => "\\_",
+        "/" => "\\/",
+        "," => "thin",
+        ":" | ">" => "med",
+        ";" => "thick",
+        " " => "space",
+        "!" => "",
+        _ => return None,
+    })
+}
+
+/// Fractions, roots, stacking, delimiters and other commands with structure.
+fn structural(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
+    Some(match name {
+        "frac" | "dfrac" | "tfrac" | "cfrac" => {
+            let num = call_arg(tokens, i);
+            let den = call_arg(tokens, i);
+            format!("({num})/({den})")
+        }
+        "binom" | "dbinom" | "tbinom" => {
+            let n = call_arg(tokens, i);
+            let k = call_arg(tokens, i);
+            format!("binom({n}, {k})")
+        }
+        "sqrt" => sqrt(tokens, i),
+        "overset" | "stackrel" => {
+            let top = call_arg(tokens, i);
+            format!("limits({})^({top})", call_arg(tokens, i))
+        }
+        "underset" => {
+            let bottom = call_arg(tokens, i);
+            format!("limits({})_({bottom})", call_arg(tokens, i))
+        }
+        "xrightarrow" | "xleftarrow" => {
+            if matches!(tokens.get(*i), Some(Token::OptionalArg(_))) {
+                *i += 1;
+            }
+            let arrow = if name == "xrightarrow" {
+                "arrow.r.long"
+            } else {
+                "arrow.l.long"
+            };
+            format!("limits({arrow})^({})", call_arg(tokens, i))
+        }
+        "not" => negate(tokens, i),
+        _ if is_sizing(name) => delimiter(tokens, i),
+        _ => return None,
+    })
+}
+
+/// `\left`, `\right`, `\middle`, `\big`, `\Bigl`, … Typst sizes delimiters
+/// automatically, so only the delimiter itself is kept.
+fn is_sizing(name: &str) -> bool {
+    matches!(name, "left" | "right" | "middle")
+        || ["big", "Big", "bigg", "Bigg"].iter().any(|base| {
+            name.strip_prefix(base)
+                .is_some_and(|rest| matches!(rest, "" | "l" | "r" | "m"))
+        })
+}
+
+fn delimiter(tokens: &[Token], i: &mut usize) -> String {
+    let Some(token) = tokens.get(*i) else {
+        return String::new();
+    };
+    *i += 1;
+    match token {
+        Token::Text(unit) => match unit.as_str() {
+            "." => "",
+            "<" => "chevron.l",
+            ">" => "chevron.r",
+            "/" => "\\/",
+            other => other,
+        }
+        .to_string(),
+        Token::Command(name) => control_symbol(name)
+            .or_else(|| LATEX_TO_TYPST_COMMANDS.get(name.as_str()).copied())
+            .unwrap_or("")
+            .to_string(),
+        _ => {
+            *i -= 1;
+            String::new()
+        }
+    }
+}
+
+fn sqrt(tokens: &[Token], i: &mut usize) -> String {
+    let index = match tokens.get(*i) {
+        Some(Token::OptionalArg(n)) => {
+            *i += 1;
+            Some(balance(&convert(&tokenize_latex(n), true)))
+        }
+        _ => None,
+    };
+    let body = call_arg(tokens, i);
+    match index {
         Some(n) => format!("root({n}, {body})"),
         None => format!("sqrt({body})"),
     }
 }
 
-/// `\text{hello}` → `"hello"`
-fn convert_text(tokens: &[Token], i: &mut usize) -> String {
-    let raw = consume_brace_arg_raw(tokens, i);
-    format!("\"{raw}\"")
-}
-
-/// `\mathbb{R}` → `RR` (via `MATHBB_TO_TYPST`), fallback to `bb(X)`
-fn convert_mathbb(tokens: &[Token], i: &mut usize) -> String {
-    let raw = consume_brace_arg_raw(tokens, i);
-    MATHBB_TO_TYPST
-        .get(raw.as_str())
-        .map(|s| (*s).to_string())
-        .unwrap_or_else(|| format!("bb({raw})"))
-}
-
-/// Generic decoration / font command: `\hat{x}` → `hat(x)`
-fn convert_function(name: &str, tokens: &[Token], i: &mut usize) -> String {
-    let typst_fn = LATEX_TO_TYPST_FUNCTIONS[name];
-    let arg = consume_brace_arg(tokens, i);
-    format!("{typst_fn}({arg})")
-}
-
-/// Consume the next token if it is a `BraceGroup` and return the recursively
-/// converted Typst string. Returns an empty string if the next token is not a
-/// brace group (graceful fallback).
-fn consume_brace_arg(tokens: &[Token], i: &mut usize) -> String {
-    if *i < tokens.len() {
-        if let Token::BraceGroup(inner) = &tokens[*i] {
-            let result = tokens_to_typst(inner);
+/// `\not` followed by a relation: use Typst's negated symbol when there is one.
+fn negate(tokens: &[Token], i: &mut usize) -> String {
+    let negated = match tokens.get(*i) {
+        Some(Token::Text(u)) if u == "=" => Some("eq.not"),
+        Some(Token::Text(u)) if u == "<" => Some("lt.not"),
+        Some(Token::Text(u)) if u == ">" => Some("gt.not"),
+        Some(Token::Command(c)) => match c.as_str() {
+            "in" => Some("in.not"),
+            "subset" => Some("subset.not"),
+            "subseteq" => Some("subset.eq.not"),
+            "equiv" => Some("equiv.not"),
+            "exists" => Some("exists.not"),
+            "parallel" => Some("parallel.not"),
+            "mid" => Some("divides.not"),
+            "sim" => Some("tilde.not"),
+            "approx" => Some("approx.not"),
+            "le" | "leq" => Some("lt.eq.not"),
+            "ge" | "geq" => Some("gt.eq.not"),
+            _ => None,
+        },
+        _ => None,
+    };
+    match negated {
+        Some(s) => {
             *i += 1;
-            return result;
+            s.to_string()
+        }
+        None => String::new(),
+    }
+}
+
+fn text_command_wrap(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "text" | "textrm" | "textnormal" | "textup" | "textmd" | "textsc" | "mbox" | "hbox" => "",
+        "textbf" => "bold",
+        "textit" | "textsl" | "emph" => "italic",
+        "texttt" => "mono",
+        "textsf" => "sans",
+        "operatorname" => "op",
+        "operatorname*" => "op*",
+        _ => return None,
+    })
+}
+
+/// `\text{…}` and friends: literal text as a Typst string.
+fn text_command(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
+    let wrap = text_command_wrap(name)?;
+    let lit = string_lit(&text_of(&next_arg(tokens, i)));
+    Some(match wrap {
+        "" => lit,
+        "op*" => format!("op({lit}, limits: #true)"),
+        func => format!("{func}({lit})"),
+    })
+}
+
+fn font_func(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "mathrm" | "mathup" => "upright",
+        "mathbf" | "boldsymbol" | "bm" | "pmb" => "bold",
+        "mathit" | "mathnormal" => "italic",
+        "mathsf" => "sans",
+        "mathtt" => "mono",
+        "mathcal" | "mathscr" => "cal",
+        "mathfrak" => "frak",
+        "mathbb" | "mathbbm" | "mathds" => "bb",
+        _ => return None,
+    })
+}
+
+/// `\mathbf{x}`, `\mathrm{KL}`, `\mathbb{R}`, …
+fn font(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
+    let func = font_func(name)?;
+    let arg = next_arg(tokens, i);
+    let raw = text_of(&arg);
+    let word = raw.trim();
+    if func == "bb" {
+        if let Some(s) = MATHBB_TO_TYPST.get(word) {
+            return Some((*s).to_string());
         }
     }
-    String::new()
-}
-
-/// Consume the next token if it is a `BraceGroup` and return the raw text
-/// content (without recursive Typst conversion). Useful for `\text` and
-/// `\mathbb` where the content is literal.
-fn consume_brace_arg_raw(tokens: &[Token], i: &mut usize) -> String {
-    if *i < tokens.len() {
-        if let Token::BraceGroup(inner) = &tokens[*i] {
-            let result = raw_text(inner);
-            *i += 1;
-            return result;
-        }
+    let is_word = word.chars().count() > 1 && word.chars().all(char::is_alphabetic);
+    if is_word && matches!(func, "upright" | "bold" | "sans" | "mono") {
+        // A multi-letter word (`\mathrm{KL}`) is one word, not a product.
+        let lit = string_lit(word);
+        return Some(if func == "upright" {
+            lit
+        } else {
+            format!("{func}({lit})")
+        });
     }
-    String::new()
+    Some(format!("{func}({})", balance(&convert(&arg, true))))
 }
 
-/// Consume the next token if it is an `OptionalArg`, returning `Some(content)`.
-fn consume_optional_arg(tokens: &[Token], i: &mut usize) -> Option<String> {
-    if *i < tokens.len() {
-        if let Token::OptionalArg(content) = &tokens[*i] {
-            let result = content.clone();
-            *i += 1;
-            return Some(result);
+/// Accents and stretchy decorations: `\hat{x}` → `hat(x)`.
+fn decoration(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
+    let func = match name {
+        "overrightarrow" => "arrow",
+        "mathring" => "circle",
+        "cancel" | "bcancel" | "xcancel" | "sout" => "cancel",
+        "phantom" | "hphantom" | "vphantom" => "hide",
+        _ => LATEX_TO_TYPST_FUNCTIONS.get(name).copied()?,
+    };
+    Some(format!("{func}({})", call_arg(tokens, i)))
+}
+
+/// Commands with no visible Typst output, or that only wrap their argument.
+fn ignored(name: &str, tokens: &[Token], i: &mut usize, in_call: bool) -> Option<String> {
+    match name {
+        "nonumber" | "notag" | "displaystyle" | "textstyle" | "scriptstyle"
+        | "scriptscriptstyle" | "limits" | "nolimits" | "allowbreak" | "nobreak" | "qedhere"
+        | "relax" | "strut" | "mathstrut" | "protect" | "hline" | "centering" | "small"
+        | "footnotesize" | "scriptsize" | "normalsize" | "large" | "rm" | "tt" | "bf" | "it"
+        | "sf" | "cal" => Some(String::new()),
+        "addtocounter" | "setcounter" => {
+            next_arg(tokens, i);
+            next_arg(tokens, i);
+            Some(String::new())
         }
+        "label" | "tag" | "hspace" | "vspace" | "color" | "cline" | "mspace" | "hskip" | "kern"
+        | "mkern" => {
+            next_arg(tokens, i);
+            Some(String::new())
+        }
+        "textcolor" => {
+            next_arg(tokens, i);
+            Some(convert(&next_arg(tokens, i), in_call))
+        }
+        "boxed" | "mathop" | "mathbin" | "mathrel" | "mathord" | "mathopen" | "mathclose"
+        | "ensuremath" => Some(convert(&next_arg(tokens, i), in_call)),
+        _ => None,
     }
-    None
 }
 
-/// Extract the raw text from a slice of tokens (concatenate all text content).
-fn raw_text(tokens: &[Token]) -> String {
+// ─── Arguments ──────────────────────────────────────────────────────────────
+
+/// The next argument: a brace group's tokens, or a single token
+/// (`\frac12`, `\hat x`).
+fn next_arg(tokens: &[Token], i: &mut usize) -> Vec<Token> {
+    match tokens.get(*i) {
+        Some(Token::BraceGroup(inner)) => {
+            *i += 1;
+            inner.clone()
+        }
+        Some(Token::Command(name)) => {
+            // `\hat\mathbf{x}`: the argument is the command with its own
+            // arguments, not the bare command.
+            let end = (*i + 1 + arity(name)).min(tokens.len());
+            let arg = tokens[*i..end].to_vec();
+            *i = end;
+            arg
+        }
+        Some(t @ Token::Text(_)) => {
+            *i += 1;
+            vec![t.clone()]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Number of brace arguments a command takes, for commands used as an
+/// undelimited argument of another command.
+fn arity(name: &str) -> usize {
+    match name {
+        "frac" | "dfrac" | "tfrac" | "cfrac" | "binom" | "overset" | "underset" | "stackrel"
+        | "textcolor" => 2,
+        "sqrt" => 1,
+        _ if LATEX_TO_TYPST_FUNCTIONS.contains_key(name) => 1,
+        _ if text_command_wrap(name).is_some() || font_func(name).is_some() => 1,
+        _ => 0,
+    }
+}
+
+/// The next argument converted for use inside a generated function call.
+fn call_arg(tokens: &[Token], i: &mut usize) -> String {
+    balance(&convert(&next_arg(tokens, i), true))
+}
+
+/// Plain text content of a token list, for `\text{…}` and font words.
+fn text_of(tokens: &[Token]) -> String {
     let mut out = String::new();
-    for t in tokens {
-        match t {
+    for token in tokens {
+        match token {
             Token::Text(s) => out.push_str(s),
-            Token::Command(name) => {
-                out.push('\\');
-                out.push_str(name);
+            Token::BraceGroup(inner) => out.push_str(&text_of(inner)),
+            Token::Command(c) if !c.chars().any(char::is_alphabetic) => {
+                out.push_str(match c.as_str() {
+                    "\\" | "," | ";" | ":" | ">" | " " => " ",
+                    "!" => "",
+                    other => other,
+                })
             }
-            Token::BraceGroup(inner) => {
-                out.push('{');
-                out.push_str(&raw_text(inner));
-                out.push('}');
-            }
+            Token::Command(_) => {}
             Token::SubScript => out.push('_'),
             Token::SuperScript => out.push('^'),
-            Token::OptionalArg(arg) => {
+            Token::OptionalArg(a) => {
                 out.push('[');
-                out.push_str(arg);
+                out.push_str(a);
                 out.push(']');
             }
-            Token::Environment { name, body } => {
-                out.push_str(&format!("\\begin{{{name}}}{body}\\end{{{name}}}"));
-            }
+            Token::Environment { body, .. } => out.push_str(body),
         }
     }
     out
 }
 
+/// A Typst string literal. Inline `$…$` inside `\text` is flattened.
+fn string_lit(s: &str) -> String {
+    let escaped = s
+        .replace('$', "")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+/// Escape delimiters that have no partner, so they cannot close (or leave
+/// open) a generated function call: `[0, 1)` → `\[0, 1\)`.
+fn balance(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut open: Vec<usize> = Vec::new();
+    let mut unmatched: Vec<usize> = Vec::new();
+    let mut in_string = false;
+    let mut k = 0;
+    while k < chars.len() {
+        match chars[k] {
+            '\\' => k += 1,
+            '"' => in_string = !in_string,
+            '(' | '[' if !in_string => open.push(k),
+            c @ (')' | ']') if !in_string => {
+                let partner = if c == ')' { '(' } else { '[' };
+                match open.last() {
+                    Some(&o) if chars[o] == partner => {
+                        open.pop();
+                    }
+                    _ => unmatched.push(k),
+                }
+            }
+            _ => {}
+        }
+        k += 1;
+    }
+    unmatched.extend(open);
+    let mut out = String::with_capacity(s.len() + unmatched.len());
+    for (k, c) in chars.iter().enumerate() {
+        if unmatched.contains(&k) {
+            out.push('\\');
+        }
+        out.push(*c);
+    }
+    out
+}
+
+// ─── Environments ───────────────────────────────────────────────────────────
+
 /// Convert a `\begin{env}…\end{env}` environment to Typst.
-fn convert_environment(name: &str, body: &str) -> String {
-    let (typst_fn, delim) = LATEX_ENV_TO_TYPST.get(name).copied().unwrap_or(("", ""));
-
-    if typst_fn.is_empty() {
-        // Unknown environment — pass through raw.
-        return format!("\\begin{{{name}}}{body}\\end{{{name}}}");
+fn environment(name: &str, body: &str) -> String {
+    let base = name.trim_end_matches('*');
+    match base {
+        "cases" | "dcases" | "rcases" => cases(body),
+        "array" | "tabular" => matrix("#none", strip_leading_group(body)),
+        "alignat" | "alignedat" => convert(&tokenize_latex(strip_leading_group(body)), false),
+        _ => match LATEX_ENV_TO_TYPST.get(base) {
+            Some(("mat", delim)) => matrix(if delim.is_empty() { "#none" } else { delim }, body),
+            // align, aligned, gather, split, equation, multline, eqnarray, unknown:
+            // Typst handles `&` alignment and `\` line breaks natively.
+            _ => convert(&tokenize_latex(body), false),
+        },
     }
-
-    if typst_fn == "cases" {
-        return convert_cases(typst_fn, body);
-    }
-
-    convert_matrix(typst_fn, delim, body)
 }
 
-/// Convert matrix-like environments: rows split by `\\`, columns by `&`.
-fn convert_matrix(func: &str, delim: &str, body: &str) -> String {
-    let rows: Vec<&str> = body.split("\\\\").collect();
-    let mut cells: Vec<String> = Vec::new();
-    let mut row_strs: Vec<String> = Vec::new();
+/// Matrix-like environments: rows split by `\\`, cells by `&`.
+fn matrix(delim: &str, body: &str) -> String {
+    let rows: Vec<String> = split_top_level(body, Separator::Row)
+        .iter()
+        .filter(|row| !row.trim().is_empty())
+        .map(|row| {
+            split_top_level(row, Separator::Cell)
+                .iter()
+                .map(|cell| matrix_cell(cell))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .collect();
+    format!("mat(delim: {delim}, {})", rows.join("; "))
+}
 
-    for row in &rows {
-        let trimmed = row.trim();
-        if trimmed.is_empty() {
+fn matrix_cell(cell: &str) -> String {
+    let converted = balance(&convert(&tokenize_latex(cell), true));
+    match converted.trim() {
+        "" => "\"\"".to_string(),
+        c => c.to_string(),
+    }
+}
+
+/// `cases`: rows separated by `,`; Typst keeps `&` alignment inside each.
+fn cases(body: &str) -> String {
+    let rows: Vec<String> = split_top_level(body, Separator::Row)
+        .iter()
+        .filter(|row| !row.trim().is_empty())
+        .map(|row| {
+            balance(&convert(&tokenize_latex(row), true))
+                .trim()
+                .to_string()
+        })
+        .collect();
+    format!("cases({})", rows.join(", "))
+}
+
+/// Drop a leading `{…}` group (the column spec of `array`, the count of
+/// `alignat`).
+fn strip_leading_group(body: &str) -> &str {
+    let trimmed = body.trim_start();
+    if !trimmed.starts_with('{') {
+        return body;
+    }
+    let mut depth = 0usize;
+    for (k, c) in trimmed.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return &trimmed[k + 1..];
+                }
+            }
+            _ => {}
+        }
+    }
+    body
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Separator {
+    /// `\\` (optionally followed by `[length]`)
+    Row,
+    /// `&`
+    Cell,
+}
+
+/// Split on `\\` or `&` outside braces and nested environments.
+fn split_top_level(body: &str, sep: Separator) -> Vec<String> {
+    let chars: Vec<char> = body.chars().collect();
+    let mut parts = vec![String::new()];
+    let mut depth = 0i32;
+    let mut k = 0;
+    while k < chars.len() {
+        depth += env_depth_change(&chars[k..]);
+        let c = chars[k];
+        if depth == 0 && is_separator(&chars, k, sep) {
+            k = if sep == Separator::Row {
+                skip_row_spacing(&chars, k + 2)
+            } else {
+                k + 1
+            };
+            parts.push(String::new());
             continue;
         }
-        let cols: Vec<String> = trimmed
-            .split('&')
-            .map(|c| latex_to_typst(c.trim()))
-            .collect();
-        row_strs.push(cols.join(", "));
+        let Some(last) = parts.last_mut() else {
+            break;
+        };
+        last.push(c);
+        if c == '\\' {
+            if let Some(&next) = chars.get(k + 1) {
+                last.push(next);
+                k += 1;
+            }
+        }
+        match c {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ => {}
+        }
+        k += 1;
     }
+    parts
+}
 
-    cells.extend(row_strs);
-    let body_str = cells.join("; ");
-
-    if delim.is_empty() {
-        format!("{func}({body_str})")
+fn env_depth_change(rest: &[char]) -> i32 {
+    let starts = |s: &str| s.chars().zip(rest).all(|(a, &b)| a == b) && rest.len() >= s.len();
+    if starts("\\begin{") {
+        1
+    } else if starts("\\end{") {
+        -1
     } else {
-        format!("{func}(delim: {delim}, {body_str})")
+        0
     }
 }
 
-/// Convert `cases` environments: rows split by `\\`, joined with `, `.
-fn convert_cases(func: &str, body: &str) -> String {
-    let rows: Vec<&str> = body.split("\\\\").collect();
-    let mut parts: Vec<String> = Vec::new();
-
-    for row in &rows {
-        let trimmed = row.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        // For cases, keep `&` as-is in the output.
-        let converted = latex_to_typst(trimmed);
-        parts.push(converted);
+fn is_separator(chars: &[char], k: usize, sep: Separator) -> bool {
+    match sep {
+        Separator::Row => chars[k] == '\\' && chars.get(k + 1) == Some(&'\\'),
+        Separator::Cell => chars[k] == '&',
     }
+}
 
-    format!("{func}({})", parts.join(", "))
+/// Skip an optional `[2pt]` after a `\\` row break.
+fn skip_row_spacing(chars: &[char], k: usize) -> usize {
+    let mut j = k;
+    while chars.get(j).is_some_and(|c| c.is_whitespace()) {
+        j += 1;
+    }
+    if chars.get(j) != Some(&'[') {
+        return k;
+    }
+    match chars[j..].iter().position(|&c| c == ']') {
+        Some(end) => j + end + 1,
+        None => k,
+    }
 }
 
 #[cfg(test)]
@@ -259,26 +772,43 @@ mod tests {
     #[test]
     fn greek_letter() {
         assert_eq!(latex_to_typst(r"\alpha"), "alpha");
+        assert_eq!(
+            latex_to_typst(r"\epsilon \varepsilon"),
+            "epsilon.alt epsilon"
+        );
     }
 
     #[test]
     fn fraction() {
         assert_eq!(latex_to_typst(r"\frac{a}{b}"), "(a)/(b)");
+        assert_eq!(latex_to_typst(r"\frac{\frac{a}{b}}{c}"), "((a)/(b))/(c)");
     }
 
     #[test]
-    fn sqrt_basic() {
+    fn sqrt_basic_and_nth() {
         assert_eq!(latex_to_typst(r"\sqrt{x}"), "sqrt(x)");
-    }
-
-    #[test]
-    fn sqrt_nth() {
         assert_eq!(latex_to_typst(r"\sqrt[3]{x}"), "root(3, x)");
     }
 
     #[test]
     fn subscript_superscript() {
         assert_eq!(latex_to_typst("x^2_i"), "x^2_i");
+        assert_eq!(latex_to_typst("x_{ij}"), "x_(i j)");
+        assert_eq!(latex_to_typst("e^{-1}"), "e^(-1)");
+        assert_eq!(latex_to_typst(r"\sum_{i=1}^{n} x_i"), "sum_(i = 1)^n x_i");
+    }
+
+    #[test]
+    fn empty_script_base() {
+        assert_eq!(latex_to_typst(r"^\dagger"), "\"\"^dagger");
+        assert_eq!(latex_to_typst(r"{}^{*}"), "\"\"^(*)");
+    }
+
+    #[test]
+    fn letters_are_separate_atoms() {
+        assert_eq!(latex_to_typst("xy + 2ab"), "x y + 2 a b");
+        assert_eq!(latex_to_typst(r"256\times256"), "256 times 256");
+        assert_eq!(latex_to_typst(r"\alpha\beta"), "alpha beta");
     }
 
     #[test]
@@ -288,14 +818,93 @@ mod tests {
 
     #[test]
     fn decoration() {
+        assert_eq!(latex_to_typst(r"\hat\mathbf{x}_0"), "hat(bold(x))_0");
+        assert_eq!(latex_to_typst(r"\frac\alpha{2}"), "(alpha)/(2)");
         assert_eq!(latex_to_typst(r"\hat{x}"), "hat(x)");
         assert_eq!(latex_to_typst(r"\bar{x}"), "overline(x)");
+        assert_eq!(latex_to_typst(r"\hat x"), "hat(x)");
     }
 
     #[test]
-    fn mathbb() {
+    fn fonts() {
         assert_eq!(latex_to_typst(r"\mathbb{R}"), "RR");
-        assert_eq!(latex_to_typst(r"\mathbb{N}"), "NN");
+        assert_eq!(latex_to_typst(r"\mathbb{E}"), "bb(E)");
+        assert_eq!(latex_to_typst(r"\mathrm{KL}"), "\"KL\"");
+        assert_eq!(latex_to_typst(r"\mathbf{x}"), "bold(x)");
+        assert_eq!(latex_to_typst(r"\mathbf{ReLU}"), "bold(\"ReLU\")");
+        assert_eq!(latex_to_typst(r"\mathcal{N}(0, I)"), "cal(N)(0, I)");
+    }
+
+    #[test]
+    fn text_and_operatorname() {
+        assert_eq!(latex_to_typst(r"x \text{ if } y"), "x \" if \" y");
+        assert_eq!(
+            latex_to_typst(r"\operatorname{softmax}(x)"),
+            "op(\"softmax\")(x)"
+        );
+        assert_eq!(
+            latex_to_typst(r"\operatorname*{arg\,max}_x"),
+            "op(\"arg max\", limits: #true)_x"
+        );
+    }
+
+    #[test]
+    fn sizing_delimiters_are_dropped() {
+        assert_eq!(latex_to_typst(r"\left( \frac{1}{2} \right)"), "((1)/(2))");
+        assert_eq!(latex_to_typst(r"\Bigg[ x \Bigg]"), "[x]");
+        assert_eq!(latex_to_typst(r"\left\{ x \right."), "{x");
+        assert_eq!(
+            latex_to_typst(r"\left\langle x \right\rangle"),
+            "chevron.l x chevron.r"
+        );
+    }
+
+    #[test]
+    fn control_symbols() {
+        assert_eq!(latex_to_typst(r"a\,b\;c\!d"), "a thin b thick c d");
+        assert_eq!(latex_to_typst(r"\{a\}"), "{a}");
+        assert_eq!(latex_to_typst(r"\|x\|"), "||x||");
+        assert_eq!(latex_to_typst(r"50\%"), "50%");
+    }
+
+    #[test]
+    fn commas_inside_calls_are_escaped() {
+        assert_eq!(latex_to_typst(r"\hat{a, b}"), r"hat(a\, b)");
+        assert_eq!(latex_to_typst(r"f(a, b)"), "f(a, b)");
+    }
+
+    #[test]
+    fn unbalanced_delimiters_inside_calls_are_escaped() {
+        assert_eq!(latex_to_typst(r"\sqrt{[0, 1)}"), r"sqrt(\[0\, 1\))");
+        // At top level Typst tolerates them.
+        assert_eq!(latex_to_typst(r"[0, 1)"), "[0, 1)");
+    }
+
+    #[test]
+    fn slash_is_literal() {
+        assert_eq!(latex_to_typst("a/b"), r"a\/b");
+    }
+
+    #[test]
+    fn unknown_command_compiles() {
+        assert_eq!(latex_to_typst(r"\mycommand x"), "op(\"mycommand\") x");
+    }
+
+    #[test]
+    fn spacing() {
+        assert_eq!(latex_to_typst(r"\quad"), "quad");
+    }
+
+    #[test]
+    fn line_breaks() {
+        assert_eq!(latex_to_typst("a &= b \\\\\nc &= d"), "a &= b \\\nc &= d");
+        assert_eq!(latex_to_typst(r"a = b \\"), "a = b");
+    }
+
+    #[test]
+    fn negations() {
+        assert_eq!(latex_to_typst(r"a \not= b"), "a eq.not b");
+        assert_eq!(latex_to_typst(r"x \not\in A"), "x in.not A");
     }
 
     #[test]
@@ -303,6 +912,14 @@ mod tests {
         assert_eq!(
             latex_to_typst(r"\begin{pmatrix}a & b \\ c & d\end{pmatrix}"),
             "mat(delim: \"(\", a, b; c, d)"
+        );
+    }
+
+    #[test]
+    fn environment_array_drops_column_spec() {
+        assert_eq!(
+            latex_to_typst(r"\begin{array}{cc}a & b \\ c & \end{array}"),
+            "mat(delim: #none, a, b; c, \"\")"
         );
     }
 
@@ -315,18 +932,11 @@ mod tests {
     }
 
     #[test]
-    fn nested_fraction() {
-        assert_eq!(latex_to_typst(r"\frac{\frac{a}{b}}{c}"), "((a)/(b))/(c)");
-    }
-
-    #[test]
-    fn unrecognized_command_passthrough() {
-        assert_eq!(latex_to_typst(r"\mycommand"), r"\mycommand");
-    }
-
-    #[test]
-    fn spacing() {
-        assert_eq!(latex_to_typst(r"\quad"), "quad");
+    fn environment_aligned_is_native() {
+        assert_eq!(
+            latex_to_typst(r"\begin{aligned}a &= b \\ c &= d\end{aligned}"),
+            "a &= b \\\nc &= d"
+        );
     }
 
     #[test]
