@@ -55,6 +55,11 @@ fn is_special_char(c: char) -> bool {
 }
 
 /// Returns true if `c` is valid inside an identifier / label / ref name.
+/// Labels and references also allow `:` and `.` (`<fig:setup>`, `@eq.1`).
+fn is_label_char(c: char) -> bool {
+    is_ident_char(c) || c == ':' || c == '.'
+}
+
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '-' || c == '_' || c == '.'
 }
@@ -274,9 +279,14 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     flush_text!();
                     i += 1; // skip `@`
                     let mut name = String::new();
-                    while i < len && is_ident_char(chars[i]) {
+                    while i < len && is_label_char(chars[i]) {
                         name.push(chars[i]);
                         i += 1;
+                    }
+                    // `see @fig:a.` — a trailing `.` or `:` ends the sentence.
+                    while name.ends_with(['.', ':']) {
+                        name.pop();
+                        i -= 1;
                     }
                     tokens.push(Token::AtRef { name });
                 } else {
@@ -291,7 +301,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             '<' => {
                 // Peek ahead to see if this is <identifier>.
                 let mut j = i + 1;
-                while j < len && is_ident_char(chars[j]) {
+                while j < len && is_label_char(chars[j]) {
                     j += 1;
                 }
                 if j > i + 1 && j < len && chars[j] == '>' {
@@ -650,6 +660,18 @@ mod tests {
         // `< ` with a space should not become a Label.
         let tokens = tokenize("a < b");
         assert!(tokens.iter().all(|t| !matches!(t, Token::Label { .. })));
+    }
+
+    #[test]
+    fn labels_and_refs_with_colons() {
+        let tokens = tokenize("<tab:latency> see @eq:latency. done");
+        assert!(matches!(&tokens[0], Token::Label { name } if name == "tab:latency"));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, Token::AtRef { name } if name == "eq:latency")));
+        assert!(tokens
+            .iter()
+            .any(|t| matches!(t, Token::Text { value } if value.starts_with(". done"))));
     }
 
     // ------------------------------------------------------------------

@@ -7,7 +7,8 @@ use crate::tables::{MATHBB_TO_TYPST, TYPST_TO_LATEX_COMMANDS};
 
 /// Convert a Typst math string to LaTeX math notation.
 pub fn typst_to_latex(input: &str) -> String {
-    let chars: Vec<char> = input.chars().collect();
+    let normalized = normalize_fractions(input);
+    let chars: Vec<char> = normalized.chars().collect();
     let mut out = String::new();
     let mut pos = 0;
     while pos < chars.len() {
@@ -36,6 +37,157 @@ pub fn typst_to_latex(input: &str) -> String {
         }
     }
     out
+}
+
+// ─── Fractions ──────────────────────────────────────────────────────────────
+
+/// Rewrite every Typst fraction `a / b` into the `(a)/(b)` form the scanner
+/// converts to `\frac`. In Typst `/` divides the nearest operands: a number,
+/// an identifier or call, a string, a parenthesized group, each with its
+/// sub/superscripts (`1 / mu`, `x^2 / 2`, `(a + b) / c`). `\/` is a slash.
+fn normalize_fractions(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut items: Vec<Item> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            let end = (i + 2).min(chars.len());
+            items.push(Item::Other(chars[i..end].iter().collect()));
+            i = end;
+        } else if chars[i] == '/' {
+            items.push(Item::Slash);
+            i += 1;
+        } else if let Some(end) = atom_end(&chars, i) {
+            items.push(Item::Atom(chars[i..end].iter().collect()));
+            i = end;
+        } else {
+            items.push(Item::Other(chars[i].to_string()));
+            i += 1;
+        }
+    }
+    combine_fractions(items)
+}
+
+enum Item {
+    Atom(String),
+    Slash,
+    Other(String),
+}
+
+fn combine_fractions(items: Vec<Item>) -> String {
+    let mut out: Vec<Item> = Vec::new();
+    let mut iter = items.into_iter().peekable();
+    while let Some(item) = iter.next() {
+        let Item::Slash = item else {
+            out.push(item);
+            continue;
+        };
+        // Operands, skipping the spaces around the slash.
+        let mut spaces = Vec::new();
+        while matches!(out.last(), Some(Item::Other(s)) if s.trim().is_empty()) {
+            spaces.push(out.pop());
+        }
+        while matches!(iter.peek(), Some(Item::Other(s)) if s.trim().is_empty()) {
+            iter.next();
+        }
+        match (out.pop(), iter.peek()) {
+            (Some(Item::Atom(num)), Some(Item::Atom(_))) => {
+                let Some(Item::Atom(den)) = iter.next() else {
+                    continue;
+                };
+                out.push(Item::Atom(format!(
+                    "({})/({})",
+                    ungroup(&num),
+                    ungroup(&den)
+                )));
+            }
+            (last, _) => {
+                // Not a fraction we can read: keep the text as it was.
+                out.extend(last);
+                out.extend(spaces.into_iter().rev().flatten());
+                out.push(Item::Other("/".into()));
+            }
+        }
+    }
+    out.into_iter()
+        .map(|item| match item {
+            Item::Atom(s) | Item::Other(s) => s,
+            Item::Slash => "/".into(),
+        })
+        .collect()
+}
+
+/// End of the operand starting at `start`, including its attachments.
+fn atom_end(chars: &[char], start: usize) -> Option<usize> {
+    let mut i = primary_end(chars, start)?;
+    loop {
+        match chars.get(i) {
+            Some('\'') => i += 1,
+            Some('_' | '^') => match primary_end(chars, i + 1) {
+                Some(end) => i = end,
+                None => return Some(i),
+            },
+            _ => return Some(i),
+        }
+    }
+}
+
+fn primary_end(chars: &[char], start: usize) -> Option<usize> {
+    let c = *chars.get(start)?;
+    if c.is_ascii_digit() {
+        let len = chars[start..]
+            .iter()
+            .take_while(|c| c.is_ascii_digit() || **c == '.')
+            .count();
+        return Some(start + len);
+    }
+    if c.is_alphabetic() {
+        let len = chars[start..]
+            .iter()
+            .take_while(|c| c.is_alphanumeric() || **c == '.')
+            .count();
+        let end = start + len;
+        // A call: `sqrt(x)`, `hat(x)`.
+        return match chars.get(end) {
+            Some('(') => matching(chars, end, '(', ')'),
+            _ => Some(end),
+        };
+    }
+    match c {
+        '(' => matching(chars, start, '(', ')'),
+        '[' => matching(chars, start, '[', ']'),
+        '"' => chars[start + 1..]
+            .iter()
+            .position(|&q| q == '"')
+            .map(|p| start + p + 2),
+        _ => None,
+    }
+}
+
+/// Index after the delimiter matching the one at `start`.
+fn matching(chars: &[char], start: usize, open: char, close: char) -> Option<usize> {
+    let mut depth = 0usize;
+    for (k, &c) in chars.iter().enumerate().skip(start) {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(k + 1);
+            }
+        }
+    }
+    None
+}
+
+/// `(a + b)` → `a + b`, leaving other operands alone.
+fn ungroup(atom: &str) -> &str {
+    let chars: Vec<char> = atom.chars().collect();
+    if chars.first() == Some(&'(') && matching(&chars, 0, '(', ')') == Some(chars.len()) {
+        &atom[1..atom.len() - 1]
+    } else {
+        atom
+    }
 }
 
 /// Read consecutive alphabetic (or `.`) characters to form an identifier.
@@ -218,5 +370,16 @@ mod tests {
     #[test]
     fn unrecognized_passthrough() {
         assert_eq!(typst_to_latex("myvar"), "myvar");
+    }
+
+    #[test]
+    fn spaced_fractions() {
+        assert_eq!(typst_to_latex("1 / mu"), r"\frac{1}{\mu}");
+        assert_eq!(
+            typst_to_latex("rho / (mu - lambda)"),
+            r"\frac{\rho}{\mu - \lambda}"
+        );
+        assert_eq!(typst_to_latex("x^2 / 2"), r"\frac{x^2}{2}");
+        assert_eq!(typst_to_latex(r"a \/ b"), r"a \/ b");
     }
 }

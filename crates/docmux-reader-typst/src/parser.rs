@@ -1532,6 +1532,7 @@ impl Parser {
         };
         let mut caption: Option<Vec<Inline>> = None;
         let mut label: Option<String> = None;
+        let mut table: Option<Table> = None;
 
         for arg in &args {
             match arg {
@@ -1555,6 +1556,9 @@ impl Parser {
                         };
                     }
                 }
+                Arg::Positional(ArgValue::FuncCall(fname, fargs)) if fname == "table" => {
+                    table = Some(self.table_from_args(fargs));
+                }
                 Arg::Named(k, ArgValue::Content(tokens)) if k == "caption" => {
                     caption = Some(self.parse_content_tokens_as_inlines(tokens.clone()));
                 }
@@ -1565,6 +1569,11 @@ impl Parser {
             }
         }
 
+        if let Some(mut table) = table {
+            table.caption = caption;
+            table.label = label;
+            return Block::Table(table);
+        }
         Block::Figure {
             image,
             caption,
@@ -1576,85 +1585,99 @@ impl Parser {
     /// Parse `#table(columns: N, [cell], ...)`.
     fn parse_table_block(&mut self) -> Block {
         let args = self.parse_args();
+        Block::Table(self.table_from_args(&args))
+    }
 
-        // Extract column count.
+    /// Build a table from `table(...)` arguments: `columns:`, cells as
+    /// content blocks, and the `table.header(...)`, `table.footer(...)` and
+    /// `table.cell(colspan: n)[...]` forms.
+    fn table_from_args(&mut self, args: &[Arg]) -> Table {
         let num_columns = args
             .iter()
             .find_map(|a| match a {
                 Arg::Named(k, ArgValue::Raw(v)) if k == "columns" => v.parse::<usize>().ok(),
                 _ => None,
             })
-            .unwrap_or(1);
+            .unwrap_or(1)
+            .max(1);
 
-        // Collect all content-block positional args as cells.
-        let mut cells: Vec<Vec<Block>> = Vec::new();
-        for arg in &args {
-            if let Arg::Positional(ArgValue::Content(tokens)) = arg {
-                let blocks = self.parse_content_tokens_as_blocks(tokens.clone());
-                cells.push(blocks);
+        let mut header: Option<Vec<TableCell>> = None;
+        let mut foot: Option<Vec<TableCell>> = None;
+        let mut cells: Vec<TableCell> = Vec::new();
+        for arg in args {
+            match arg {
+                Arg::Positional(ArgValue::FuncCall(name, inner)) if name == "table.header" => {
+                    header = Some(self.cells_from_args(inner));
+                }
+                Arg::Positional(ArgValue::FuncCall(name, inner)) if name == "table.footer" => {
+                    foot = Some(self.cells_from_args(inner));
+                }
+                Arg::Positional(_) => cells.extend(self.cells_from_args(std::slice::from_ref(arg))),
+                _ => {}
             }
         }
 
-        // Build columns spec.
-        let columns: Vec<ColumnSpec> = (0..num_columns)
-            .map(|_| ColumnSpec {
-                alignment: Alignment::Default,
-                width: None,
-            })
-            .collect();
+        // Without an explicit header, the first row is the header.
+        if header.is_none() && cells.len() > num_columns {
+            let rest = cells.split_off(num_columns);
+            header = Some(std::mem::replace(&mut cells, rest));
+        }
+        let rows = rows_from_cells(cells, num_columns);
 
-        // Split cells into header (first row) and body rows.
-        let (header, rows) = if cells.len() > num_columns {
-            let header_cells: Vec<TableCell> = cells[..num_columns]
-                .iter()
-                .map(|blocks| TableCell {
-                    content: blocks.clone(),
-                    colspan: 1,
-                    rowspan: 1,
-                })
-                .collect();
-
-            let body_cells: Vec<Vec<TableCell>> = cells[num_columns..]
-                .chunks(num_columns)
-                .map(|chunk| {
-                    chunk
-                        .iter()
-                        .map(|blocks| TableCell {
-                            content: blocks.clone(),
-                            colspan: 1,
-                            rowspan: 1,
-                        })
-                        .collect()
-                })
-                .collect();
-
-            (Some(header_cells), body_cells)
-        } else {
-            // All cells in one row, no header.
-            let row: Vec<TableCell> = cells
-                .into_iter()
-                .map(|blocks| TableCell {
-                    content: blocks,
-                    colspan: 1,
-                    rowspan: 1,
-                })
-                .collect();
-            if row.is_empty() {
-                (None, Vec::new())
-            } else {
-                (None, vec![row])
-            }
-        };
-
-        Block::Table(Table {
+        Table {
             caption: None,
             label: None,
-            columns,
+            columns: (0..num_columns)
+                .map(|_| ColumnSpec {
+                    alignment: Alignment::Default,
+                    width: None,
+                })
+                .collect(),
             header,
             rows,
-            foot: None,
+            foot,
             attrs: None,
-        })
+        }
+    }
+
+    /// Cells from positional arguments: `[content]` or `table.cell(...)[...]`.
+    fn cells_from_args(&mut self, args: &[Arg]) -> Vec<TableCell> {
+        let mut cells = Vec::new();
+        for arg in args {
+            match arg {
+                Arg::Positional(ArgValue::Content(tokens)) => cells.push(TableCell {
+                    content: self.parse_content_tokens_as_blocks(tokens.clone()),
+                    colspan: 1,
+                    rowspan: 1,
+                }),
+                Arg::Positional(ArgValue::FuncCall(name, inner)) if name == "table.cell" => {
+                    let span = |key: &str| {
+                        inner
+                            .iter()
+                            .find_map(|a| match a {
+                                Arg::Named(k, ArgValue::Raw(v)) if k == key => v.parse().ok(),
+                                _ => None,
+                            })
+                            .unwrap_or(1)
+                    };
+                    let (colspan, rowspan) = (span("colspan"), span("rowspan"));
+                    let mut cell =
+                        self.cells_from_args(inner)
+                            .into_iter()
+                            .next()
+                            .unwrap_or(TableCell {
+                                content: Vec::new(),
+                                colspan: 1,
+                                rowspan: 1,
+                            });
+                    cell.colspan = colspan;
+                    cell.rowspan = rowspan;
+                    cells.push(cell);
+                }
+                _ => {}
+            }
+        }
+        cells
     }
 
     /// Parse `#quote(block: true)[content]`.
@@ -2128,6 +2151,25 @@ fn trim_leading_space(mut inlines: Vec<Inline>) -> Vec<Inline> {
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+
+/// Group cells into rows of `columns` grid slots, counting colspans.
+fn rows_from_cells(cells: Vec<TableCell>, columns: usize) -> Vec<Vec<TableCell>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut used = 0usize;
+    for cell in cells {
+        used += cell.colspan.max(1) as usize;
+        row.push(cell);
+        if used >= columns {
+            rows.push(std::mem::take(&mut row));
+            used = 0;
+        }
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
 
 #[cfg(test)]
 mod tests {
@@ -2770,5 +2812,18 @@ mod tests {
         assert_eq!(doc.metadata.title.as_deref(), Some("Test"));
         assert!(doc.metadata.custom.contains_key("lang"));
         assert!(doc.metadata.custom.contains_key("custom_field"));
+    }
+
+    #[test]
+    fn figure_with_table_header_and_label() {
+        let input = "#figure(\n  table(\n    columns: 2,\n    table.header([A], [B]),\n    [1], [2],\n    [3], [4],\n  ),\n  caption: [Numbers.],\n) <tab:n>\n";
+        let doc = TypstReader::new().read(input).unwrap();
+        let Block::Table(table) = &doc.content[0] else {
+            panic!("expected table, got {:?}", doc.content);
+        };
+        assert_eq!(table.label.as_deref(), Some("tab:n"));
+        assert!(table.caption.is_some());
+        assert_eq!(table.header.as_ref().map(Vec::len), Some(2));
+        assert_eq!(table.rows.len(), 2);
     }
 }
