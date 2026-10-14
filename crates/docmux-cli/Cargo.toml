@@ -33,6 +33,7 @@ docmux-transform-number-sections = { workspace = true }
 docmux-transform-section-divs = { workspace = true }
 docmux-transform-cite = { workspace = true }
 docmux-transform-math = { workspace = true }
+docmux-pipeline = { workspace = true }
 docmux-template = { workspace = true }
 hayagriva = { workspace = true }
 clap = { workspace = true }

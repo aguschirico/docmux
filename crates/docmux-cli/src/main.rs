@@ -12,7 +12,7 @@ use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
 use docmux_transform_cite::CiteTransform;
-use docmux_transform_math::{MathNotation, MathTarget, MathTransform};
+use docmux_transform_math::MathTarget;
 use docmux_transform_number_sections::NumberSectionsTransform;
 use docmux_transform_section_divs::SectionDivsTransform;
 use docmux_transform_toc::TocTransform;
@@ -321,7 +321,8 @@ fn main() {
                 Some(p) if !p.as_os_str().is_empty() => p,
                 _ => std::path::Path::new("."),
             };
-            let files = load_latex_includes_from_disk(&combined_input, base_dir);
+            let mut files = load_latex_includes_from_disk(&combined_input, base_dir);
+            load_bbl_from_disk(&combined_input, main_path, base_dir, &mut files);
             match docmux_reader_latex::LatexReader::new().read_with_files(&combined_input, &files) {
                 Ok(d) => d,
                 Err(e) => {
@@ -505,25 +506,14 @@ fn main() {
         }
     }
 
-    // Apply math transform when needed
-    let source_notation = match from {
-        "typst" => MathNotation::Typst,
-        _ => MathNotation::LaTeX,
+    // Citations, cross-references and math notation for the target format.
+    let math_override = match cli.math.as_deref() {
+        Some("mathml") => Some(MathTarget::MathML),
+        _ => None,
     };
-    let target_format = match (to, &cli.math) {
-        (_, Some(ref m)) if m == "mathml" => MathTarget::MathML,
-        ("typst", _) => MathTarget::Typst,
-        _ => MathTarget::None,
-    };
-    if target_format != MathTarget::None {
-        let math_transform = MathTransform {
-            target_format,
-            source_notation,
-        };
-        if let Err(e) = math_transform.transform(&mut doc, &TransformContext::default()) {
-            eprintln!("docmux: math transform error: {e}");
-            std::process::exit(1);
-        }
+    if let Err(e) = docmux_pipeline::prepare(&mut doc, from, to, math_override) {
+        eprintln!("docmux: transform error: {e}");
+        std::process::exit(1);
     }
 
     // Show warnings in verbose mode
@@ -961,6 +951,39 @@ fn load_latex_includes_from_disk(
         }
     }
     files
+}
+
+/// Load the `.bbl` files BibTeX wrote for this document: one per
+/// `\bibliography{name}` argument, and `<main>.bbl` next to the main file,
+/// which is what arXiv ships. Keys are file names (`refs.bbl`).
+fn load_bbl_from_disk(
+    source: &str,
+    main_path: &std::path::Path,
+    base_dir: &std::path::Path,
+    files: &mut HashMap<String, String>,
+) {
+    let mut names: Vec<String> = Vec::new();
+    let sources = std::iter::once(source).chain(files.values().map(String::as_str));
+    for text in sources {
+        if let Some(start) = text.find("\\bibliography{") {
+            let args = &text[start + "\\bibliography{".len()..];
+            if let Some(end) = args.find('}') {
+                names.extend(args[..end].split(',').map(|n| n.trim().to_string()));
+            }
+        }
+    }
+    if let Some(stem) = main_path.file_stem().and_then(|s| s.to_str()) {
+        names.push(stem.to_string());
+    }
+    for name in names {
+        let key = format!("{}.bbl", name.trim_end_matches(".bib"));
+        if files.contains_key(&key) {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(base_dir.join(&key)) {
+            files.insert(key, content);
+        }
+    }
 }
 
 /// Apply `-M KEY=VAL` overrides to document metadata.

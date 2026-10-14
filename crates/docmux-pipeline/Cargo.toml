@@ -1,0 +1,15 @@
+[package]
+name = "docmux-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The transforms every docmux conversion runs, shared by the CLI and WASM"
+rust-version.workspace = true
+
+[dependencies]
+docmux-ast = { workspace = true }
+docmux-core = { workspace = true }
+docmux-transform-crossref = { workspace = true }
+docmux-transform-math = { workspace = true }
+docmux-transform-references = { workspace = true }

@@ -11,7 +11,6 @@ use docmux_reader_latex::LatexReader;
 use docmux_reader_markdown::MarkdownReader;
 use docmux_reader_myst::MystReader;
 use docmux_reader_typst::TypstReader;
-use docmux_transform_crossref::CrossRefTransform;
 use docmux_transform_number_sections::NumberSectionsTransform;
 use docmux_writer_docx::DocxWriter;
 use docmux_writer_html::HtmlWriter;
@@ -132,9 +131,7 @@ pub fn convert_with_resources(
         .read(input)
         .map_err(|e| JsError::new(&e.to_string()))?;
     doc.resources = js_map_to_resources(resources);
-    let ctx = docmux_core::TransformContext::default();
-    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
-    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    prepare(&mut doc, from, to)?;
     let opts = WriteOptions {
         standalone: false,
         highlight_style: if to == "html" {
@@ -168,9 +165,7 @@ pub fn convert_to_bytes(
         .read(input)
         .map_err(|e| JsError::new(&e.to_string()))?;
     doc.resources = js_map_to_resources(resources);
-    let ctx = docmux_core::TransformContext::default();
-    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
-    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    prepare(&mut doc, from, to)?;
     let opts = WriteOptions::default();
     let bytes = writer
         .write_bytes(&doc, &opts)
@@ -200,9 +195,7 @@ pub fn convert_bytes_to_bytes(
     for (k, v) in js_map_to_resources(resources) {
         doc.resources.entry(k).or_insert(v);
     }
-    let ctx = docmux_core::TransformContext::default();
-    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
-    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    prepare(&mut doc, from, to)?;
     let opts = WriteOptions::default();
     let bytes = writer
         .write_bytes(&doc, &opts)
@@ -265,9 +258,7 @@ pub fn convert_with_files(
 
     doc.resources = js_map_to_resources(resources);
 
-    let ctx = docmux_core::TransformContext::default();
-    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
-    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    prepare(&mut doc, from, to)?;
 
     let opts = WriteOptions {
         standalone,
@@ -298,10 +289,7 @@ fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<
         .read(input)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    // Run transforms: number sections → cross-refs.
-    let ctx = docmux_core::TransformContext::default();
-    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
-    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    prepare(&mut doc, from, to)?;
 
     let opts = WriteOptions {
         standalone,
@@ -315,6 +303,17 @@ fn convert_inner(input: &str, from: &str, to: &str, standalone: bool) -> Result<
     writer
         .write(&doc, &opts)
         .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// The transforms shared with the CLI, plus section numbers in the text for
+/// writers that do not number headings themselves.
+fn prepare(doc: &mut docmux_ast::Document, from: &str, to: &str) -> Result<(), JsError> {
+    if !docmux_pipeline::writer_numbers_sections(to) {
+        NumberSectionsTransform::new()
+            .transform(doc, &docmux_core::TransformContext::default())
+            .map_err(|e| JsError::new(&e.to_string()))?;
+    }
+    docmux_pipeline::prepare(doc, from, to, None).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Parse a document and return the AST as pretty-printed JSON.
@@ -386,9 +385,7 @@ fn convert_bytes_inner(
     let mut doc = binary_reader
         .read_bytes(input)
         .map_err(|e| JsError::new(&e.to_string()))?;
-    let ctx = docmux_core::TransformContext::default();
-    let _ = NumberSectionsTransform::new().transform(&mut doc, &ctx);
-    let _ = CrossRefTransform::new().transform(&mut doc, &ctx);
+    prepare(&mut doc, from, to)?;
     let opts = WriteOptions {
         standalone,
         highlight_style: if to == "html" {
