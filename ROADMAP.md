@@ -1,203 +1,125 @@
 # docmux Roadmap
 
-> Last updated: 2026-04-09
+> Last updated: 2026-10-14
+> Current phase: Phase 4, measure against pandoc
 
-## Phase 1 — MVP (Markdown → HTML + LaTeX) ✅
+## Goal: compatibility with pandoc
 
-- [x] Workspace scaffold: 14 crates, CI (check, test, fmt, wasm)
-- [x] `docmux-ast` — rich AST: 13 block types, 16 inline types, metadata, bibliography, serde roundtrip (5 tests)
-- [x] `docmux-core` — traits (`Reader`, `Writer`, `Transform`), `Pipeline`, `Registry`, `WriteOptions` (2 tests)
-- [x] `docmux-reader-markdown` — CommonMark + GFM via comrak, YAML frontmatter parsing (15 tests)
-- [x] `docmux-writer-html` — HTML5 semantic output, standalone mode with KaTeX/MathJax (6 tests)
-- [x] `docmux-writer-latex` — LaTeX output with document class, math environments, tables (10 tests)
-- [x] `docmux-cli` — clap CLI with format auto-detection (10 smoke + 3 golden tests)
-- [x] `docmux-wasm` — wasm-bindgen: `convert()`, `markdownToHtml()`, format listing
-- [x] Fix display math bug (`$$...$$` promoted from inline to `Block::MathBlock`)
-- [x] Golden file test harness (13 fixtures × 2 formats = 26 golden files)
-- [x] `docmux-transform-crossref` — auto-number figures, tables, equations; resolve `CrossRef` nodes (7 tests)
-- [x] `docmux-reader-latex` — recursive descent LaTeX parser, preamble extraction, best-effort with warnings (53 tests)
+pandoc is the reference for document conversion, and docmux measures itself against it. The goal is compatibility: docmux should read the documents pandoc users write, produce output they recognize, and exchange documents and filters with pandoc itself. It should do that while staying small enough to embed, in the browser through WebAssembly, in Node, or as Rust crates.
 
-## Phase 2 — Format Coverage + Pandoc Parity (AST & CLI)
+Compatibility is measured, not estimated. Phase 4 builds a harness that runs the same inputs through pandoc and docmux and compares the results, so every format gets a real number and every gap becomes a test.
 
-### Pandoc parity — AST ✅
+### Principles
 
-- [x] `Block::Div` with `Attributes` — generic container for fenced divs, MyST directives
-- [x] `Inline::Underline` — needed for DOCX, HTML roundtrip
-- [x] `attrs: Option<Attributes>` on `Heading`, `CodeBlock`, `Figure`, `Table`
-- [x] `tight: bool` on `List` (populated from comrak's `list.tight`)
-- [x] `ListStyle` enum (Decimal, LowerAlpha, UpperAlpha, LowerRoman, UpperRoman)
-- [x] `ListDelim` enum (Period, OneParen, TwoParens)
-- [x] Writers handle `Div` and `Underline`; crossref transform recurses into both
+- **pandoc is the oracle.** When docmux and pandoc disagree, pandoc's behavior is the default answer. Deliberate differences are documented.
+- **The core stays WASM-first.** Readers, writers and transforms compile to `wasm32-unknown-unknown`. Features that need processes or a file system (external filters, Lua, PDF engines) live only in the CLI.
+- **Real documents first.** Gaps found by real documents (the arXiv corpus, issues with attached files) go ahead of gaps found by reading the pandoc manual.
+- **Every gap becomes a test** in the crate that owns it, so the fix stays fixed when the source document is gone.
 
-### Pandoc parity — CLI ✅
+## Where we are (v0.6.0)
 
-- [x] `-t json` — dump parsed AST as pretty-printed JSON
-- [x] Stdin support (`-` as input)
-- [x] Multiple input files (concatenated)
-- [x] `--shift-heading-level-by=N`
-- [x] `-M KEY=VAL` metadata overrides
-- [x] `--math=katex|mathjax|mathml|raw`
-- [x] `--css=URL` (repeatable)
-- [x] `--variable KEY=VAL`
-- [x] `--list-input-formats`, `--list-output-formats`
-- [x] `--verbose` / `--quiet`
+Shipped through Phases 1 to 3, plus what came after:
 
-### Pandoc parity — Markdown reader
+- **Formats:** Markdown (CommonMark + GFM), LaTeX, Typst, Word (.docx), HTML and MyST, read and write. Plain text, write only.
+- **AST:** pandoc's block and inline model, including `Div`, `Span`, `Underline`, `Quoted`, attributes on headings, code, links, images, tables and figures, list styles and delimiters, table footers, per-key citation prefixes and suffixes. docmux extras: `MathBlock`, `CrossRef`, `Admonition`, `FootnoteDef`.
+- **CLI:** `--standalone`, `--template`, `--toc`, `-N`, `--top-level-division`, `--bibliography`, `--csl`, `--nocite`, `--math`, `--css`, `-M`, `--variable`, `--wrap`, `--columns`, `--eol`, `--highlight-style`, `--section-divs`, `--id-prefix`, `--shift-heading-level-by`, stdin and multiple inputs, `-t json` (docmux AST).
+- **Transforms:** CSL citations (hayagriva), cross-references, table of contents, section numbering, section divs, LaTeX/Typst/MathML math.
+- **LaTeX as people write it:** user macros expanded, `\input`/`\include` followed, citations resolved from the `.bbl`, checked against eight arXiv papers whose Typst output compiles.
+- **Word:** math as native OMML equations (1,870 equations across the corpus, verified by reading them back with pandoc), bookmarks and internal links.
+- **Packaging:** `@docmux/wasm` on npm (trusted publishing, staged releases), 26 crates on crates.io, playground and landing at [docmux.pages.dev](https://docmux.pages.dev).
 
-- [x] Auto-generate GFM-style heading IDs (slugify, dedup, 4 tests)
-- [x] Header attributes `{#id .class key=val}` (pandoc extension, 7 tests)
-- [x] Fenced code attributes `` ```{.python .numberLines} `` (pandoc extension, 5 tests)
+The detailed Phase 1 to 3 checklists are in the git history of this file.
 
-### Format coverage
+## Phase 4: Measure against pandoc
 
-- [x] `docmux-reader-typst` — Typst markup parser (81 tests)
-- [x] `docmux-writer-typst` — Typst output (16 unit tests, 4 golden files)
-- [x] `docmux-reader-myst` — MyST Markdown: directives, roles, labels, recursive nesting (15 tests)
+Everything after this phase is prioritized by what this harness finds.
 
-## Phase 3 — Production Features
+### pandoc JSON interchange
 
-### Pandoc parity — AST ✅
+- [ ] `pandoc-json` reader and writer for pandoc's JSON AST (pandoc-types 1.23, as written by pandoc 3.x)
+- [ ] Mapping for docmux-only nodes, documented both ways: `MathBlock` as `Para [Math DisplayMath]`, `Admonition` as a `Div` with the admonition class, `FootnoteDef` and `FootnoteRef` as `Note`, `CrossRef` as a decision to make (a link to `#target`, or pandoc-crossref's citation form)
+- [ ] AST additions needed for a lossless round trip: `Block::LineBlock`, `MetaInlines` and `MetaBlocks` in `MetaValue`, multi-row table heads, row and cell attributes, short and long captions, multiple table bodies
+- [ ] Round-trip property test: pandoc JSON → docmux → pandoc JSON is identical for every case in the harness
 
-- [x] `Inline::Quoted` (smart quotes: SingleQuote, DoubleQuote)
-- [x] `attrs` on inline `Code`, `Link`, `Image`
-- [x] `Image.alt` as `Vec<Inline>` instead of `String` (+ `alt_text()` helper)
-- [x] Per-key prefix/suffix in `Citation` (`CiteItem` struct, `keys()` helper)
-- [x] `abstract_text` as `Vec<Block>` (formatted abstract)
-- [x] Table footer (`foot: Option<Vec<TableCell>>`)
+### Compatibility harness
 
-### Pandoc parity — CLI
+- [ ] `scripts/compat/`: fetches pandoc's own test inputs (`test/command/*.md`, the reader and writer test suites) into a gitignored cache, pinned to a pandoc release. They are not committed, as with the arXiv sources.
+- [ ] Reader check: `pandoc -f X -t json` vs `docmux -f X -t pandoc-json`, compared after normalization
+- [ ] Writer check: render the same pandoc JSON with both tools, then read both outputs back with pandoc and compare the ASTs, so formatting differences that do not change meaning are not counted
+- [ ] Report: pass rate per reader and per writer, written to `docs/compat/report.md`
+- [ ] Weekly CI job against the pinned pandoc version; it reports and does not block merges
 
-- [x] `--toc` and `--toc-depth=N`
-- [x] `-N` / `--number-sections`
-- [x] `--top-level-division=section|chapter|part`
-- [x] `--wrap=auto|none|preserve`, `--columns=N`
-- [x] `--eol=crlf|lf|native`
-- [x] `--template=FILE` with template engine
-- [x] `--bibliography=FILE`, `--csl=FILE`
-- [x] `--highlight-style=STYLE`, `--list-highlight-themes`, `--list-highlight-languages`
-- [x] `--section-divs`, `--id-prefix=PREFIX`
+### Filters
 
-### Pandoc parity — Extensions (markdown reader)
+- [ ] `--filter PROGRAM` (CLI only): pipe pandoc JSON through any pandoc JSON filter (pandocfilters, panflute, and others)
+- [ ] `-f json` and `-t json` keep meaning the docmux AST; the pandoc AST is `pandoc-json`. To decide: whether `json` should switch to pandoc's AST for drop-in compatibility
 
-- [x] Smart punctuation (`--smart`) — enabled via comrak `parse.smart`
-- [x] Bracketed spans `[text]{.class}` (5 tests)
-- [x] `raw_attribute` syntax (inline + block, 6 tests)
-- [x] Table captions (pandoc convention, 5 tests)
-- [x] Subscript `~text~` in markdown (via comrak extension)
-- [x] Superscript `^text^` in markdown (via comrak extension)
+## Phase 5: Pandoc Markdown
 
-### Transforms
+pandoc's own Markdown is what its users write, and today docmux reads CommonMark + GFM through comrak. Checked against pandoc 3.12.1 on 2026-10-14, these come out as plain text in docmux:
 
-- [x] `docmux-transform-cite` — CSL citation processing
-  - [x] Fix: embed `locales-en-US.xml` so dates render in citations
-  - [x] Forward `CiteItem.prefix`/`suffix` to hayagriva (enables `(see Smith 2020, p. 42)`)
-  - [x] `--nocite` flag
-- [x] `docmux-transform-toc` — table of contents generation (6 tests)
-- [x] `docmux-transform-number-sections` — heading numbering (7 tests)
-- [x] `docmux-transform-section-divs` — wrap sections in Div containers (7 tests)
-- [x] `docmux-transform-math` — LaTeX ↔ Typst conversion + MathML output
+- [ ] Fenced divs `::: class`
+- [ ] Inline notes `^[...]`
+- [ ] Line blocks `| line`
+- [ ] Simple, multiline and grid tables
+- [ ] Fancy lists (`a)`, `i.`, `#.`) and example lists `(@)`
+- [ ] Implicit figures (a standalone image with alt text becomes a figure)
+- [ ] Citation locators kept without a bibliography (`[@doe, p. 3]` currently drops `p. 3`)
+- [ ] pandoc title block (`% Title`)
+- [ ] Raw TeX in Markdown (`raw_tex`)
 
-### Writers & readers
+Then the format names and switches pandoc users type:
 
-- [x] `docmux-writer-markdown` — CommonMark/GFM roundtrip, normalization (28 tests)
-- [x] `docmux-writer-plaintext` — stripped text output (29 tests)
-- [x] `docmux-reader-html` — HTML reader with scraper/html5ever (29 tests)
-- [x] `docmux-writer-docx` — OOXML output via zip + XML generation (29 unit + 1 integration test)
-- [x] `docmux-writer-myst` — MyST Markdown output
+- [ ] Format names: `markdown` (pandoc flavor), `gfm`, `commonmark`, `commonmark_x`, `markdown_strict`, `markdown_mmd`, `markdown_phpextra`
+- [ ] Extension toggles: `-f markdown+smart-raw_html`, `--list-extensions[=FORMAT]`
+- [ ] Markdown writer that emits each flavor, pandoc Markdown by default for `-t markdown`
 
-### Template system
+Decision to make first, with a spike: extend comrak with pre- and post-processing, or write a pandoc Markdown parser. The harness from Phase 4 decides how close each option gets.
 
-- [x] Template engine (variable interpolation, conditionals, loops) — `docmux-template` crate, 33 tests
-- [x] Built-in default templates per output format (HTML, LaTeX, Markdown, Plaintext)
+## Phase 6: Formats pandoc users reach for
 
-### Syntax highlighting
+In order of expected demand. Issues with real documents move items up.
 
-- [x] `docmux-highlight` — server-side highlighting via `syntect` (8 tests), integrated in HTML and LaTeX writers
-- [x] Line numbers (`.numberLines`, `startFrom`), line highlighting (`highlight="2,4-6"`)
+- [ ] EPUB writer (EPUB 3), then reader
+- [ ] ODT writer, then reader; `--reference-doc` for DOCX and ODT
+- [ ] reStructuredText reader and writer
+- [ ] Jupyter notebooks (`ipynb`) reader and writer
+- [ ] Org Mode reader and writer
+- [ ] AsciiDoc writer, then reader
+- [ ] Slides: reveal.js and Beamer writers, then PowerPoint (PPTX); `--slide-level`, `--incremental`
+- [ ] Djot reader and writer
+- [ ] JATS writer (journal publishing)
+- [ ] Bibliographies as formats: BibTeX, BibLaTeX and CSL JSON readers and writers
 
-### Packaging
+## Phase 7: pandoc's tooling
 
-- [x] `npm/` package — `@docmux/wasm` published with JS/TS wrapper, automated release
-
-## Phase 4 — Extended Formats + Advanced Features
-
-### AST
-
-- [ ] `Block::LineBlock` (poetry, addresses)
-- [ ] `MetaInlines` / `MetaBlocks` in `MetaValue`
-- [ ] Multi-row table headers, row/cell attributes
-- [ ] Short + long table captions
-
-### Readers & writers
-
-- [x] DOCX reader (49 tests, BinaryReader trait, style classifier, CLI + WASM integration)
-  - [x] Document body, tables, multi-paragraph cells, hyperlinks, footnotes
-  - [x] Image extraction (`<w:drawing>` inline + anchor → `Document.resources` → data URIs)
-  - [ ] Character styling (`<w:color>`, `<w:sz>`, `<w:highlight>` → inline CSS in HTML output)
-  - [ ] List assembly (numbered/bulleted from `<w:numPr>`)
-  - [ ] Drawing/shape parsing (VML `<v:imagedata>`, SmartArt)
-- [ ] EPUB reader + writer
-- [ ] reStructuredText reader + writer
-- [ ] AsciiDoc reader
-- [ ] Djot reader + writer
-- [ ] Jupyter notebook reader
-- [ ] Beamer output (LaTeX presentations)
-- [ ] reveal.js output (HTML presentations)
-- [ ] ODT writer
-
-### CLI
-
-- [ ] `--self-contained` / `--embed-resources`
-- [ ] `--extract-media=DIR`
-- [ ] `--filter=PROGRAM` (JSON filter protocol)
-- [ ] WASM filter support
+- [ ] `--defaults FILE` (YAML defaults files)
+- [ ] `--embed-resources`, `--extract-media=DIR`, `--resource-path`
+- [ ] WASM filters: docmux-native filters that also run in the browser
+- [ ] Lua filters (CLI only), if the harness and issues show demand
+- [ ] CSL locales beyond en-US, multiple bibliographies
+- [ ] DOCX reader: character styling, list assembly from `<w:numPr>`, drawings and shapes, track changes (`--track-changes`)
 - [ ] `--log=FILE`, `--trace`
+- [ ] Custom `.tmTheme` highlight themes, custom syntax definitions
+- [ ] Emoji (`:name:`), encoding detection and BOM handling
 - [ ] Watch mode (`docmux watch input.md -o output.html`)
 
-### Math
+## Phase 8: Long tail
 
-- [ ] OMML math output in DOCX writer (LaTeX → Office Math Markup Language)
+Driven by demand. pandoc 3.12 reads about 50 formats and writes about 80; these are the rest:
 
-### Syntax highlighting
-
-- [ ] Load custom `.tmTheme` theme files
-- [ ] Per-code-block theme selection
-
-### Other
-
-- [ ] Emoji replacement (`:name:` → Unicode)
-- [ ] Encoding detection / BOM handling
-- [x] Publish to npm (automated via CI on tag push)
-- [x] `@docmux/wasm/web` target for Vite / vanilla JS (explicit `init()`)
-
-### DOCX image pipeline
-
-- [x] Resource-aware image embedding (`doc.resources` → filesystem → fallback)
-- [x] PNG/JPEG dimension parsing from headers, capped at 6" wide
-- [x] CLI pre-loads relative image paths into `doc.resources`
-- [x] WASM: `convertToBytes`, `convertBytesToBytes`, `convertWithResources`
-- [x] Playground: DOCX output format, binary download, image drag-and-drop
-- [ ] Publish to crates.io
-
-## Phase 5 — Long Tail
-
-- [ ] Org Mode reader + writer
-- [ ] MediaWiki reader + writer
-- [ ] JIRA/Confluence reader + writer
-- [ ] man page reader + writer
-- [ ] PowerPoint (PPTX) writer
-- [ ] DokuWiki, RTF, Textile, CSV/TSV readers
-- [ ] Multiple bibliographies, example lists, abbreviations
-- [ ] DOCX track changes
-- [ ] Custom syntax definitions, line highlighting
-- [ ] Presentation options (slide-level, incremental)
+- Wikis: MediaWiki, DokuWiki, Jira, TikiWiki, TWiki, VimWiki, XWiki, ZimWiki, Creole
+- Documentation: man, mdoc, Texinfo, DocBook, POD, Haddock, ms
+- Publishing and markup: TEI, ICML, ConTeXt, Muse, txt2tags, Textile, Markua, FB2, OPML, BBCode, ANSI
+- Data and office: RTF, CSV, TSV, XLSX and PPTX readers, RIS and EndNote XML
 
 ## Non-goals (for now)
 
-- PDF output (use LaTeX → pdflatex/tectonic instead)
-- GUI application
-- Plugin system for third-party formats (revisit in Phase 4)
+- PDF through external engines in the CLI. Use LaTeX or Typst output and their own compilers.
+- A desktop application. The playground is a demo of the library.
+- Byte-for-byte identical output. Compatibility means the same document, which the harness checks through pandoc's AST.
 
 ## Reference
 
-Full pandoc parity analysis: [`docs/pandoc-parity-check.md`](docs/pandoc-parity-check.md) (117 items, 14 categories)
+- [`docs/pandoc-parity-check.md`](docs/pandoc-parity-check.md): gap analysis from 2026-03-25, kept for history. Phase 4's compatibility report replaces it.
+- Open issues about pandoc differences: [#2 LaTeX writer preamble and environment gaps](https://github.com/aguschirico/docmux/issues/2)

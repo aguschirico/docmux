@@ -1,4 +1,6 @@
-# docmux vs pandoc — Exhaustive Parity Check
+# docmux vs pandoc: Exhaustive Parity Check
+
+> **Historical snapshot.** This analysis is from 2026-03-25 and many of its gaps are closed. The current plan is in [`ROADMAP.md`](../ROADMAP.md), and the compatibility report from Phase 4 replaces this table.
 
 > Generated: 2026-03-25
 > Scope: pandoc 3.x feature set vs docmux current state

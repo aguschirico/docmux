@@ -6,7 +6,7 @@ A universal document converter written in Rust. Architecture: **Reader → AST �
 
 ## Architecture
 
-- **Workspace layout**: 24 crates under `crates/`. Each reader/writer/transform is a separate crate. See root `Cargo.toml` for the full list.
+- **Workspace layout**: 27 crates under `crates/`. Each reader/writer/transform is a separate crate. See root `Cargo.toml` for the full list.
 - **AST design**: Rich typed nodes (13+ block types, 16+ inline types) — math, citations, cross-refs, admonitions, divs, underline are first-class. All strings are owned (`String`), no lifetimes in the public API.
 - **Crate boundaries**: Readers/writers/transforms depend only on `docmux-ast` + `docmux-core`. No cross-dependencies.
 - **Testing strategy**: Golden file tests + CLI smoke tests + per-crate unit tests. Update expectations with `DOCMUX_UPDATE_EXPECTATIONS=1 cargo test`.
@@ -54,8 +54,4 @@ Key rules that apply everywhere:
 
 ## Current status
 
-See `ROADMAP.md` for full status. Phase 1 and Phase 2 complete, Phase 3 in progress.
-
-### Next up
-
-`--template`, `--bibliography`, `--csl`, cite/math transforms, DOCX reader enhancements, npm package. See `docs/pandoc-parity-check.md` for gap analysis.
+See `ROADMAP.md`. The goal is compatibility with pandoc, measured by a harness that compares docmux with pandoc on the same inputs. Phases 1 to 3 are complete; the current phase is named on the `Current phase:` line at the top of `ROADMAP.md`.

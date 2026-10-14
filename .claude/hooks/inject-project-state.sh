@@ -15,14 +15,8 @@ CRATE_COUNT=$(ls -d crates/*/ 2>/dev/null | wc -l | tr -d ' ')
 TEST_COUNT=$(cargo test --workspace -- --list 2>/dev/null | grep -c ': test$' || echo "?")
 
 # Get current phase from ROADMAP.md
-PHASE="unknown"
-if [ -f ROADMAP.md ]; then
-    if grep -q "Phase 3.*in progress\|Phase 3.*🔄" ROADMAP.md 2>/dev/null; then
-        PHASE="Phase 3 in progress"
-    elif grep -q "Phase 3.*✅\|Phase 3.*complete" ROADMAP.md 2>/dev/null; then
-        PHASE="Phase 3 complete"
-    fi
-fi
+PHASE=$(sed -n 's/^> Current phase: //p' ROADMAP.md 2>/dev/null | head -1)
+PHASE=${PHASE:-unknown}
 
 # Output as additionalContext
 cat <<EOF
