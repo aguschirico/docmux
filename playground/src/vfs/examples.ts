@@ -2,7 +2,7 @@ import type { Example } from "@/examples";
 import { db } from "./db";
 
 /** Examples load into their own workspace, so user files are never touched. */
-const EXAMPLES_WORKSPACE = "Examples";
+export const EXAMPLES_WORKSPACE = "Examples";
 
 /**
  * Replace the Examples workspace's files with `example`'s and return the

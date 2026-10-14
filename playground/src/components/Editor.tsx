@@ -8,6 +8,7 @@ import { useDocxImport } from "@/hooks/useDocxImport";
 import { useDropZone } from "@/hooks/useDropZone";
 import { useImageDrop } from "@/hooks/useImageDrop";
 import { getMonacoLanguage, isBinaryFormat } from "@/lib/formats";
+import { EDITOR_OPTIONS, MONACO_THEME, setupMonaco } from "@/lib/monaco";
 
 interface EmptyStateProps {
   icon: React.ReactNode;
@@ -132,21 +133,18 @@ export function Editor() {
       {isDragging && <DropOverlay />}
       <MonacoEditor
         onMount={(editor) => { editorRef.current = editor; }}
+        beforeMount={setupMonaco}
+        loading={null}
         height="100%"
-        theme="vs-dark"
+        theme={MONACO_THEME}
         language={getMonacoLanguage(filePath)}
         value={content}
         onChange={onChange}
         options={{
-          minimap: { enabled: false },
+          ...EDITOR_OPTIONS,
           fontSize: 13,
-          fontFamily: "JetBrains Mono, Fira Code, monospace",
-          lineNumbers: "on",
-          scrollBeyondLastLine: false,
-          wordWrap: "on",
-          padding: { top: 12 },
-          renderLineHighlight: "gutter",
-          bracketPairColorization: { enabled: true },
+          renderLineHighlight: "line",
+          bracketPairColorization: { enabled: false },
           tabSize: 2,
         }}
       />

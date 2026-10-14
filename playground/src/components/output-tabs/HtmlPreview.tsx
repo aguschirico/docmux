@@ -1,14 +1,21 @@
 import { useMemo } from "react";
 
 const PREVIEW_CSS = `
+html { background: #18181b; }
 body {
   font-family: Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
   line-height: 1.6;
   color: #1a1a1a;
-  max-width: 46rem;
-  margin: 0 auto;
-  padding: 2rem 2.5rem 4rem;
+  background: #fff;
+  max-width: 44rem;
+  margin: 2rem auto 3rem;
+  padding: 3.5rem 4rem 4rem;
   font-size: 16px;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 40px rgb(0 0 0 / 0.45);
+}
+@media (max-width: 760px) {
+  body { margin: 0; padding: 1.5rem 1.25rem 3rem; border-radius: 0; }
 }
 header h1.title, h1.title { text-align: center; border: none; font-size: 1.9em; margin-bottom: 0.2em; }
 p.author, p.date, .author, .date { text-align: center; color: #4b5563; margin: 0.2em 0; }
@@ -23,8 +30,8 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 0.5em;
   line-height: 1.3;
 }
-h1 { font-size: 1.8em; border-bottom: 1px solid #e5e5e5; padding-bottom: 0.3em; }
-h2 { font-size: 1.4em; border-bottom: 1px solid #e5e5e5; padding-bottom: 0.2em; }
+h1 { font-size: 1.55em; }
+h2 { font-size: 1.3em; }
 h3 { font-size: 1.15em; }
 p { margin: 0.8em 0; }
 a { color: #2563eb; text-decoration: none; }
@@ -130,7 +137,7 @@ export function HtmlPreview({ html }: HtmlPreviewProps) {
       // the playground's storage, even if the document carries raw HTML.
       sandbox="allow-scripts"
       title="HTML Preview"
-      className="h-full w-full border-0 bg-white"
+      className="h-full w-full border-0 bg-zinc-900"
     />
   );
 }

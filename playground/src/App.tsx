@@ -45,22 +45,18 @@ function useInitialDocument(onExample: (example: Example) => void) {
 
 function Layout() {
   const [tab, setTab] = useState(DEFAULT_EXAMPLE.output);
-  const [example, setExample] = useState<string | null>(null);
-  const [onExample] = useState(() => (loaded: Example) => {
-    setExample(loaded.id);
-    setTab(loaded.output);
-  });
+  const [onExample] = useState(() => (loaded: Example) => setTab(loaded.output));
   useInitialDocument(onExample);
 
   return (
     <div className="flex h-dvh flex-col bg-zinc-950 text-zinc-100">
       <Header />
-      <ExampleBar activeExample={example} onLoaded={onExample} />
+      <ExampleBar onLoaded={onExample} />
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={50} minSize={25}>
           <InputPane />
         </ResizablePanel>
-        <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-zinc-500 active:bg-zinc-400" />
+        <ResizableHandle className="bg-zinc-800 transition-colors hover:bg-sky-500/60 active:bg-sky-400" />
         <ResizablePanel defaultSize={50} minSize={25}>
           <OutputPanel tabId={tab} onTabChange={setTab} />
         </ResizablePanel>

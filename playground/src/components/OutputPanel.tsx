@@ -59,12 +59,12 @@ function TabButton({ tab, active, onSelect }: { tab: OutputTab; active: boolean;
   return (
     <button
       onClick={onSelect}
-      className={`relative h-10 shrink-0 px-3 text-sm transition-colors ${
+      className={`relative h-11 shrink-0 px-3.5 text-sm font-medium transition-colors ${
         active ? "text-zinc-50" : "text-zinc-400 hover:text-zinc-200"
       }`}
     >
       {tab.label}
-      {active && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-sky-400" />}
+      {active && <span className="absolute inset-x-2.5 bottom-0 h-0.5 rounded-full bg-sky-400 shadow-[0_0_8px] shadow-sky-400/70" />}
     </button>
   );
 }
@@ -137,16 +137,26 @@ function Body({ tab, state, baseName }: { tab: OutputTab; state: ConversionState
 function StatusLine({ tab, state }: { tab: OutputTab; state: ConversionState }) {
   if (!state.inputFormat) return null;
   const target = tab.id === PREVIEW_TAB ? "HTML preview" : tab.label;
+  const failed = state.errors.length > 0;
   return (
-    <div className="flex shrink-0 items-center gap-3 border-t border-zinc-800 px-4 py-1.5 text-[11px] text-zinc-500">
-      <span>
-        {formatName(state.inputFormat)} → {target}
-        {state.ms !== null && ` · ${state.ms} ms`}
+    <div className="flex shrink-0 items-center gap-3 border-t border-zinc-800/80 bg-zinc-900/40 px-4 py-2 text-xs text-zinc-400">
+      <span className="inline-flex items-center gap-2">
+        <span className={`h-1.5 w-1.5 rounded-full ${failed ? "bg-red-400" : "bg-emerald-400"}`} />
+        <span className="text-zinc-200">{formatName(state.inputFormat)}</span>
+        <span className="text-zinc-600">→</span>
+        <span className="text-zinc-200">{target}</span>
       </span>
-      {state.errors.length > 0 && (
+      {state.ms !== null && (
+        <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300">
+          {state.ms} ms
+        </span>
+      )}
+      {failed ? (
         <span className="truncate text-red-400" title={state.errors.join("\n")}>
           {state.errors.length} error{state.errors.length > 1 ? "s" : ""}: {state.errors[0]}
         </span>
+      ) : (
+        <span className="ml-auto hidden text-zinc-500 sm:inline">Converted locally, in your browser</span>
       )}
     </div>
   );
@@ -167,14 +177,14 @@ export function OutputPanel({ tabId, onTabChange }: OutputPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center border-b border-zinc-800 pl-2 pr-2">
+      <div className="flex shrink-0 items-center border-b border-zinc-800/80 bg-zinc-900/40 pl-2 pr-2">
         <div className="flex min-w-0 items-center overflow-x-auto">
           {MAIN_TABS.filter((t) => t.id !== inputFormat).map((t) => (
             <TabButton key={t.id} tab={t} active={t.id === tab.id} onSelect={() => onTabChange(t.id)} />
           ))}
           <DropdownMenu>
             <DropdownMenuTrigger
-              className={`inline-flex h-10 shrink-0 items-center gap-1 px-3 text-sm transition-colors ${
+              className={`inline-flex h-11 shrink-0 items-center gap-1 px-3.5 text-sm font-medium transition-colors ${
                 moreActive ? "text-zinc-50" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >

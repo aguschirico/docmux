@@ -13,7 +13,7 @@ export const PREVIEW_TAB = "preview";
 
 export const MAIN_TABS: OutputTab[] = [
   { id: PREVIEW_TAB, label: "Preview", language: "html", extension: "html" },
-  { id: "typst", label: "Typst", language: "plaintext", extension: "typ" },
+  { id: "typst", label: "Typst", language: "typst", extension: "typ" },
   { id: "html", label: "HTML", language: "html", extension: "html" },
   { id: "latex", label: "LaTeX", language: "latex", extension: "tex" },
   { id: "markdown", label: "Markdown", language: "markdown", extension: "md" },

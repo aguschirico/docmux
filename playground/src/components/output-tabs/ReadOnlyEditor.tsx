@@ -1,4 +1,5 @@
 import MonacoEditor from "@monaco-editor/react";
+import { EDITOR_OPTIONS, MONACO_THEME, setupMonaco } from "@/lib/monaco";
 
 interface ReadOnlyEditorProps {
   value: string | null;
@@ -22,18 +23,15 @@ export function ReadOnlyEditor({
   return (
     <MonacoEditor
       height="100%"
-      theme="vs-dark"
+      theme={MONACO_THEME}
+      beforeMount={setupMonaco}
+      loading={null}
       language={language}
       value={value}
       options={{
+        ...EDITOR_OPTIONS,
         readOnly: true,
-        minimap: { enabled: false },
-        fontSize: 12,
-        fontFamily: "JetBrains Mono, Fira Code, monospace",
-        lineNumbers: "on",
-        scrollBeyondLastLine: false,
-        wordWrap: "on",
-        padding: { top: 12 },
+        fontSize: 13,
         renderLineHighlight: "none",
         domReadOnly: true,
       }}

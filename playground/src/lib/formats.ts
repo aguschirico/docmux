@@ -20,7 +20,7 @@ const EXTENSION_TO_MONACO: Record<string, string> = {
   markdown: "markdown",
   tex: "latex",
   latex: "latex",
-  typ: "typescript",
+  typ: "typst",
   html: "html",
   htm: "html",
   json: "json",
@@ -32,6 +32,7 @@ const EXTENSION_TO_MONACO: Record<string, string> = {
   ts: "typescript",
   myst: "markdown",
   bib: "plaintext",
+  bbl: "latex",
 };
 
 export function getExtension(path: string): string {
