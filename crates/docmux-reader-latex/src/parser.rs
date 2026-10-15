@@ -891,7 +891,8 @@ impl Parser {
                 });
                 Some(Inline::FootnoteRef { id })
             }
-            "footnote" => {
+            // Margin and side notes have no margin to go to outside LaTeX.
+            "footnote" | "marginnote" | "marginpar" | "sidenote" => {
                 self.footnote_counter += 1;
                 let id = format!("fn{}", self.footnote_counter);
                 let content_inlines = self.parse_inline_content();
@@ -2148,6 +2149,21 @@ mod tests {
         assert_eq!(
             docmux_ast::inlines_to_plain_text(content),
             r"The \LambdaCDM model"
+        );
+    }
+
+    #[test]
+    fn margin_notes_become_footnotes() {
+        let input = r"A symmetry\marginnote{Invertible maps.} is a map.";
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected a paragraph, got {:?}", doc.content);
+        };
+        assert!(
+            content
+                .iter()
+                .any(|i| matches!(i, Inline::FootnoteRef { .. })),
+            "{content:?}"
         );
     }
 
