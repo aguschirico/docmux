@@ -1,6 +1,6 @@
 {
   "name": "@docmux/wasm",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "The WebAssembly build of docmux: convert LaTeX, Markdown, Typst, Word, HTML and MyST in the browser or Node",
   "license": "MIT",
   "type": "module",
