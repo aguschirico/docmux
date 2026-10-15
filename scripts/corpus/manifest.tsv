@@ -1,9 +1,105 @@
 # arXiv id	main file	short name
 1312.6114	iclr14_sva.tex	VAE
-1412.6980	arxiv.tex	Adam
 1512.03385	residual_v1_arxiv_release.tex	ResNet
 1706.03762	ms.tex	Transformer
 1810.04805	main.tex	BERT
 2005.14165	main.tex	GPT-3
 2006.11239	main.tex	DDPM
 2106.09685	iclr2022_conference.tex	LoRA
+1406.2661	adversarial.tex	Generative Adversarial N
+1409.0473	search.tex	Neural Machine Translati
+1502.03167	arx.tex	Batch Normalization
+1505.04597	paper459.tex	U-Net
+1312.5602	deepqnet.tex	Playing Atari with
+1412.6572	iclr2015.tex	Explaining and Harnessin
+1607.06450	ln_paper_arxiv.tex	Layer Normalization
+1609.02907	main.tex	Semi-Supervised Classifi
+1710.10903	iclr2018_conference.tex	Graph Attention Networks
+1503.02531	main11.tex	Distilling the Knowledge
+1606.08415	main.tex	Gaussian Error Linear
+1910.10683	20-074.tex	Exploring the Limits
+2010.11929	main.tex	An Image is
+2103.00020	clip_paper.tex	Learning Transferable Vi
+2201.11903	neurips_2022.tex	Chain-of-Thought Prompti
+2203.02155	neurips_2021.tex	Training language models
+2302.13971	acl2023.tex	LLaMA
+2307.09288	templateArxiv.tex	Llama 2
+2205.14135	streaming_attention_neurips_2022.tex	FlashAttention
+2112.10752	ms.tex	High-Resolution Image Sy
+1907.11692	main.tex	RoBERTa
+1301.3781	efficient-v22.tex	Efficient Estimation of
+1408.5882	Kim_EMNLP_2014.tex	Convolutional Neural Net
+2001.08361	main.tex	Scaling Laws for
+2203.15556	main.tex	Training Compute-Optimal
+1706.03741	main.tex	Deep reinforcement learn
+1603.04467	tensorflow.tex	TensorFlow
+1912.01703	main.tex	PyTorch
+1201.0490	pedregosa11a.tex	Scikit-learn
+2009.03300	main.tex	Measuring Massive Multit
+2107.03374	main.tex	Evaluating Large Languag
+2210.03629	iclr2023_conference.tex	ReAct
+2305.18290	main.tex	Direct Preference Optimi
+2212.08073	main.tex	Constitutional AI
+2005.11401	neurips_2020.tex	Retrieval-Augmented Gene
+1910.01108	neurips_2019.tex	DistilBERT, a distilled
+1603.02754	XGBoostArxiv.tex	XGBoost
+1506.02640	yolo.tex	You Only Look Once
+1311.2524	r-cnn-arxiv.tex	Rich feature hierarchies
+1409.1556	ilsvrc14.tex	Very Deep Convolutional
+1608.06993	main.tex	Densely Connected Convol
+1704.04861	main.tex	MobileNets
+1801.04381	main-stripped.tex	MobileNetV2
+1905.11946	arxiv-stripped.tex	EfficientNet
+1802.05365	deep_representations_bilm.tex	Deep contextualized word
+1609.03499	main.tex	WaveNet
+1511.06434	iclr2016_conference.tex	Unsupervised Representat
+1312.6199	understanding.tex	Intriguing properties of
+1810.00826	main.tex	How Powerful are
+math/0211159	main.tex	The entropy formula
+math/0303109	main.tex	Ricci flow with
+math/0307245	main.tex	Finite extinction time
+math/0404188	main.tex	The primes contain
+1603.04246	sphere_packing_e8_revision_arxiv.tex	The sphere packing
+1603.06518	CKMRV24.tex	The sphere packing
+1909.03562	collatz.tex	Almost all orbits
+1907.00847	main.tex	Induced subgraphs of
+2203.17207	main.tex	A Proof of
+2303.09521	Ramsey_arXiv_revised.tex	An exponential improveme
+1512.03547	main.tex	Graph Isomorphism in
+1105.1475	aos1204.tex	Pivotal estimation via
+1802.03426	main.tex	UMAP
+1608.04644	paper.tex	Towards Evaluating the
+1412.3555	chung2014dlrlw.tex	Empirical Evaluation of
+1404.1100	pca.tex	A Tutorial on
+1011.3027	non-asymptotic-rmt-plain.tex	Introduction to the
+0806.4080	main.tex	The FORM project
+1207.0580	dropout.tex	Improving neural network
+1207.7214	TheATLASJulyPaper.tex	Observation of a
+1207.7235	HIG-12-028_temp.tex	Observation of a
+1910.11333	QS_Supplement.tex	Supplementary informatio
+1801.00862	NISQ-Quantum.tex	Quantum Computing in
+1807.06209	ms.tex	Planck 2018 results.
+astro-ph/9812133	40sneemulate.tex	Measurements of Omega
+gr-qc/0507014	paper2.tex	Evolution of Binary
+hep-ph/0503172	EWSB1.tex	The Anatomy of
+1303.5076	final_params_paper.tex	Planck 2013 results.
+2104.13478	main.tex	Geometric Deep Learning
+1105.0566	3P-_1_.tex	Euclidean three-point fu
+q-bio/0510002	p53PlulsetrainModel.tex	A p53 Oscillator
+2002.06305	main.tex	Fine-Tuning Pretrained L
+1811.12808	model-eval.tex	Model Evaluation, Model
+1710.09412	ms.tex	mixup
+1806.07572	main_Arxiv2.tex	Neural Tangent Kernel
+1705.07874	main.tex	A Unified Approach
+1602.04938	main.tex	"Why Should I
+1703.01365	paper-icml.tex	Axiomatic Attribution fo
+1611.01578	iclr2017_conference.tex	Neural Architecture Sear
+1804.02767	supplementary.tex	YOLOv3
+2004.10934	yolov4.tex	YOLOv4
+1703.06870	maskrcnn_arxiv.tex	Mask R-CNN
+1506.01497	rpn_pami_arxiv.tex	Faster R-CNN
+1612.03144	fpn.tex	Feature Pyramid Networks
+1708.02002	dense.tex	Focal Loss for
+1405.0312	coco.tex	Microsoft COCO
+1312.4400	nin-iclr2014.tex	Network In Network
+1409.4842	goingdeeper.tex	Going Deeper with

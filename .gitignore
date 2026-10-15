@@ -14,3 +14,4 @@ npm/bundler/
 npm/node/
 npm/dist/
 scripts/corpus/.cache/
+scripts/corpus/__pycache__/
