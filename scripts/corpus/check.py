@@ -30,7 +30,8 @@ OUT = HERE / ".cache" / "out"
 DOCMUX = HERE.parent.parent / "target" / "release" / "docmux"
 
 IMAGE = re.compile(r'image\("(?:[^"\\]|\\.)*"(?:, alt: "(?:[^"\\]|\\.)*")?(?:, width: [^,)]*)?\)')
-SKIP = re.compile(r'```.*?```|`[^`\n]*`|#raw\("(?:[^"\\]|\\.)*"\)|"(?:[^"\\\n]|\\.)*"', re.S)
+# Code, raw text and string literals; a `\"` is an escaped quote, not a string.
+SKIP = re.compile(r'```.*?```|`[^`\n]*`|#raw\("(?:[^"\\]|\\.)*"\)|(?<!\\)"(?:[^"\\\n]|\\.)*"', re.S)
 # `\n` is not a LaTeX command: papers write it as the newline escape ("{\textbackslash}n").
 CMD = re.compile(r"\\(?!n\b)[a-zA-Z]+")
 # A backslash the source prints on purpose: `{\textbackslash}name`, `$\backslash$name`.

@@ -22,13 +22,16 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 
 
 def titles(ids: list[str]) -> dict[str, str]:
-    url = "https://export.arxiv.org/api/query?max_results=200&id_list=" + ",".join(ids)
-    feed = ET.fromstring(download(url))
     out = {}
-    for entry in feed.iter(ATOM + "entry"):
-        link = entry.findtext(ATOM + "id") or ""
-        pid = re.sub(r"v\d+$", "", link.split("/abs/")[-1])
-        out[pid] = " ".join((entry.findtext(ATOM + "title") or "").split())
+    for start in range(0, len(ids), 100):
+        batch = ids[start : start + 100]
+        url = "https://export.arxiv.org/api/query?max_results=100&id_list=" + ",".join(batch)
+        feed = ET.fromstring(download(url))
+        for entry in feed.iter(ATOM + "entry"):
+            link = entry.findtext(ATOM + "id") or ""
+            pid = re.sub(r"v\d+$", "", link.split("/abs/")[-1])
+            out[pid] = " ".join((entry.findtext(ATOM + "title") or "").split())
+        time.sleep(3)  # arXiv asks bulk clients for one request every 3 seconds
     return out
 
 
