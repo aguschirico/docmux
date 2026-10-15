@@ -47,8 +47,16 @@ impl LatexReader {
         input: &str,
         files: &HashMap<String, String>,
     ) -> Result<Document> {
+        // Windows (CRLF) and classic Mac (CR) line endings: a stray `\r` would
+        // reach the output, where Typst reads it as a line break.
+        let input = normalize_newlines(input);
+        let files: HashMap<String, String> = files
+            .iter()
+            .map(|(name, source)| (name.clone(), normalize_newlines(source)))
+            .collect();
+        let files = &files;
         // `\bibliography{refs}` stands for the `.bbl` BibTeX produced.
-        let input = inline_bbl(input, files);
+        let input = inline_bbl(&input, files);
 
         // User macros may be defined in any file and used in any other.
         let mut defs = macros::Macros::default();
@@ -111,6 +119,10 @@ fn inline_bbl(source: &str, files: &HashMap<String, String>) -> String {
     )
 }
 
+fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 impl Reader for LatexReader {
     fn format(&self) -> &str {
         "latex"
@@ -129,6 +141,18 @@ impl Reader for LatexReader {
 mod tests {
     use super::*;
     use docmux_ast::Block;
+
+    #[test]
+    fn carriage_returns_become_newlines() {
+        let doc = LatexReader::new()
+            .read("\\section{A\r long title}\r\\label{sec:a}\r\n\r\nText.")
+            .unwrap();
+        let Block::Heading { id, content, .. } = &doc.content[0] else {
+            panic!("expected a heading, got {:?}", doc.content);
+        };
+        assert_eq!(id.as_deref(), Some("sec:a"));
+        assert!(!format!("{content:?}").contains('\r'));
+    }
 
     #[test]
     fn reader_trait_metadata() {
