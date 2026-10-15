@@ -166,6 +166,8 @@ impl Emitter {
                 self.out.push('\\');
                 self.out.push(c);
             }
+            // Inside a call, `name:` would start a named argument.
+            ':' if self.in_call => self.out.push_str("\\:"),
             ',' | ';' => {
                 if self.in_call {
                     self.out.push('\\');
@@ -420,15 +422,43 @@ fn text_command_wrap(name: &str) -> Option<&'static str> {
     })
 }
 
-/// `\text{…}` and friends: literal text as a Typst string.
+/// `\text{…}` and friends: literal text as a Typst string. Plain text can
+/// switch back to math (`\text{if $x > 0$}`) or hold a whole `tabular`.
 fn text_command(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
     let wrap = text_command_wrap(name)?;
-    let lit = string_lit(&text_of(&next_arg(tokens, i)));
+    let arg = next_arg(tokens, i);
+    if wrap.is_empty() {
+        if arg.iter().any(|t| matches!(t, Token::Environment { .. })) {
+            return Some(convert(&arg, false));
+        }
+        let raw = text_of(&arg);
+        let dollars = raw.matches('$').count();
+        if dollars > 0 && dollars % 2 == 0 && !raw.contains("\\$") {
+            return Some(text_with_math(&raw));
+        }
+    }
+    let lit = string_lit(&text_of(&arg));
     Some(match wrap {
         "" => lit,
         "op*" => format!("op({lit}, limits: #true)"),
         func => format!("{func}({lit})"),
     })
+}
+
+/// Text with `$…$` inside: strings for the text, math for the rest.
+fn text_with_math(raw: &str) -> String {
+    raw.split('$')
+        .enumerate()
+        .filter(|(_, part)| !part.trim().is_empty())
+        .map(|(k, part)| {
+            if k % 2 == 1 {
+                convert(&tokenize_latex(part), false).trim().to_string()
+            } else {
+                string_lit(part)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn font_func(name: &str) -> Option<&'static str> {
@@ -466,7 +496,10 @@ fn font(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
             format!("{func}({lit})")
         });
     }
-    Some(format!("{func}({})", balance(&convert(&arg, true))))
+    Some(format!(
+        "{func}({})",
+        non_empty(balance(&convert(&arg, true)))
+    ))
 }
 
 /// Accents and stretchy decorations: `\hat{x}` → `hat(x)`.
@@ -560,7 +593,16 @@ fn arity(name: &str) -> usize {
 
 /// The next argument converted for use inside a generated function call.
 fn call_arg(tokens: &[Token], i: &mut usize) -> String {
-    balance(&convert(&next_arg(tokens, i), true))
+    non_empty(balance(&convert(&next_arg(tokens, i), true)))
+}
+
+/// A Typst call needs an argument: `\hat{}` becomes `hat("")`, not `hat()`.
+fn non_empty(arg: String) -> String {
+    if arg.trim().is_empty() {
+        "\"\"".to_string()
+    } else {
+        arg
+    }
 }
 
 /// Plain text content of a token list, for `\text{…}` and font words.
@@ -644,7 +686,12 @@ fn environment(name: &str, body: &str) -> String {
     let base = name.trim_end_matches('*');
     match base {
         "cases" | "dcases" | "rcases" => cases(body),
-        "array" | "tabular" => matrix("#none", strip_leading_group(body)),
+        "array" => matrix("#none", strip_leading_group(body)),
+        // A text table inside math: its cells switch to math with `$`.
+        "tabular" => matrix("#none", &strip_leading_group(body).replace('$', "")),
+        // A commutative diagram: Typst math cannot draw its arrows, so keep
+        // the objects in their grid.
+        "tikzcd" => matrix("#none", &strip_tikzcd_arrows(body)),
         "alignat" | "alignedat" => convert(&tokenize_latex(strip_leading_group(body)), false),
         _ => match LATEX_ENV_TO_TYPST.get(base) {
             Some(("mat", delim)) => matrix(if delim.is_empty() { "#none" } else { delim }, body),
@@ -693,10 +740,61 @@ fn cases(body: &str) -> String {
     format!("cases({})", rows.join(", "))
 }
 
+/// `\arrow[…]` and `\ar[…]` in a tikzcd body, with their options, which can
+/// hold labels in quotes and nested brackets.
+fn strip_tikzcd_arrows(body: &str) -> String {
+    let chars: Vec<char> = body.chars().collect();
+    let mut out = String::with_capacity(body.len());
+    let mut k = 0;
+    while k < chars.len() {
+        let rest: String = chars[k..chars.len().min(k + 7)].iter().collect();
+        let name_len = if rest.starts_with("\\arrow") {
+            6
+        } else if rest.starts_with("\\ar") && !chars.get(k + 3).is_some_and(|c| c.is_alphabetic()) {
+            3
+        } else {
+            0
+        };
+        if name_len == 0 {
+            out.push(chars[k]);
+            k += 1;
+            continue;
+        }
+        k += name_len;
+        while chars.get(k).is_some_and(|c| c.is_whitespace()) {
+            k += 1;
+        }
+        if chars.get(k) == Some(&'[') {
+            let (mut depth, mut quoted) = (0usize, false);
+            while k < chars.len() {
+                match chars[k] {
+                    '"' => quoted = !quoted,
+                    '[' if !quoted => depth += 1,
+                    ']' if !quoted => {
+                        depth -= 1;
+                        if depth == 0 {
+                            k += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                k += 1;
+            }
+        }
+    }
+    out
+}
+
 /// Drop a leading `{…}` group (the column spec of `array`, the count of
-/// `alignat`).
+/// `alignat`), and the `[t]`/`[c]` position before an array's column spec.
 pub(crate) fn strip_leading_group(body: &str) -> &str {
-    let trimmed = body.trim_start();
+    let mut trimmed = body.trim_start();
+    if let Some(rest) = trimmed.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            trimmed = rest[end + 1..].trim_start();
+        }
+    }
     if !trimmed.starts_with('{') {
         return body;
     }
@@ -930,6 +1028,33 @@ mod tests {
             "(u, i) tilde.op (v, j)"
         );
         assert_eq!(latex_to_typst(r"\sin(x)"), "sin (x)");
+    }
+
+    #[test]
+    fn empty_accents_and_colons_inside_calls() {
+        assert_eq!(latex_to_typst(r"\ddot{}"), r#"dot.double("")"#);
+        assert_eq!(
+            latex_to_typst(r"\begin{array}[c]{l} Q_1 := a \end{array}"),
+            r"mat(delim: #none, Q_1\: = a)"
+        );
+    }
+
+    #[test]
+    fn tikzcd_keeps_its_objects_in_a_grid() {
+        let src = r#"\begin{tikzcd} H \arrow[r, "\alpha"] & H' \\ S_H \arrow[u, bend left, "\rho"] & S \end{tikzcd}"#;
+        assert_eq!(latex_to_typst(src), "mat(delim: #none, H, H'; S_H, S)");
+    }
+
+    #[test]
+    fn text_can_switch_back_to_math() {
+        assert_eq!(
+            latex_to_typst(r"f(x) \text{ if $x > 0$}"),
+            r#"f(x) " if " x > 0"#
+        );
+        assert_eq!(
+            latex_to_typst(r"\text{\begin{tabular}{cc} $a$ & $b$ \end{tabular}}"),
+            "mat(delim: #none, a, b)"
+        );
     }
 
     #[test]
