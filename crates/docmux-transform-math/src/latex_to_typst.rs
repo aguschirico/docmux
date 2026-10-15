@@ -8,7 +8,7 @@
 //!   letters are emitted as separate atoms (`x y`);
 //! - `name(` starts a function call whose arguments are separated by `,` and
 //!   `;`, so content placed inside generated calls escapes them, and
-//!   unbalanced delimiters inside a call are escaped too;
+//!   unbalanced delimiters are escaped, inside a call or anywhere else;
 //! - a sub/superscript needs a base and a single (or parenthesized) argument,
 //!   so empty bases become `""` and multi-token scripts are wrapped in `(…)`.
 //!
@@ -21,7 +21,9 @@ use crate::tokenizer::{tokenize_latex, Token};
 
 /// Convert a LaTeX math string to Typst math notation.
 pub fn latex_to_typst(input: &str) -> String {
-    let converted = convert(&tokenize_latex(input), false);
+    // Half-open intervals like `(0, 1]` are unbalanced on purpose, and Typst
+    // rejects an unclosed delimiter anywhere in a formula.
+    let converted = balance(&convert(&tokenize_latex(input), false));
     let mut out = converted.trim();
     // A trailing `\\` would become a dangling `\` that escapes the closing `$`.
     while let Some(rest) = out.strip_suffix('\\') {
@@ -152,7 +154,9 @@ impl Emitter {
             self.atom(unit);
             return;
         };
-        if matches!(c, '(' | '[') && self.script_end == Some(self.out.len()) {
+        if matches!(c, '(' | '[')
+            && (self.script_end == Some(self.out.len()) || ends_with_name(&self.out))
+        {
             self.out.push(' ');
         }
         match c {
@@ -186,6 +190,17 @@ impl Emitter {
         self.out.push_str(&script_arg(tokens, i));
         self.script_end = Some(self.out.len());
     }
+}
+
+/// True when the output ends with a multi-letter name (`in`, `tilde.op`),
+/// which a `(` right after it would turn into a function call.
+fn ends_with_name(out: &str) -> bool {
+    let name: String = out
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphabetic() || *c == '.')
+        .collect();
+    name.chars().filter(|c| c.is_alphabetic()).count() > 1
 }
 
 /// True when a `_`/`^` here would have nothing to attach to in Typst.
@@ -460,7 +475,17 @@ fn decoration(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
         "overrightarrow" => "arrow",
         "mathring" => "circle",
         "cancel" | "bcancel" | "xcancel" | "sout" => "cancel",
-        "phantom" | "hphantom" | "vphantom" => "hide",
+        // `hide` is not a math function: it takes content, so the phantom
+        // gets its own (inline) equation.
+        "phantom" | "hphantom" | "vphantom" => {
+            let inner = convert(&next_arg(tokens, i), false);
+            let inner = inner.trim();
+            return Some(if inner.is_empty() {
+                String::new()
+            } else {
+                format!("#hide(${inner}$)")
+            });
+        }
         _ => LATEX_TO_TYPST_FUNCTIONS.get(name).copied()?,
     };
     Some(format!("{func}({})", call_arg(tokens, i)))
@@ -891,10 +916,27 @@ mod tests {
     }
 
     #[test]
-    fn unbalanced_delimiters_inside_calls_are_escaped() {
+    fn unbalanced_delimiters_are_escaped() {
         assert_eq!(latex_to_typst(r"\sqrt{[0, 1)}"), r"sqrt(\[0\, 1\))");
-        // At top level Typst tolerates them.
-        assert_eq!(latex_to_typst(r"[0, 1)"), "[0, 1)");
+        assert_eq!(latex_to_typst(r"[0, 1)"), r"\[0, 1\)");
+        // After a symbol, `(` would open call arguments that never close.
+        assert_eq!(latex_to_typst(r"\alpha \in (0, 1]"), r"alpha in \(0, 1\]");
+    }
+
+    #[test]
+    fn a_paren_after_a_symbol_name_is_not_a_call() {
+        assert_eq!(
+            latex_to_typst(r"(u, i) \sim (v, j)"),
+            "(u, i) tilde.op (v, j)"
+        );
+        assert_eq!(latex_to_typst(r"\sin(x)"), "sin (x)");
+    }
+
+    #[test]
+    fn phantom_hides_an_inline_equation() {
+        assert_eq!(latex_to_typst(r"a \phantom{b} c"), "a#hide($b$) c");
+        assert_eq!(latex_to_typst(r"\phantom{}"), "");
+        assert_eq!(latex_to_typst(r"f(a, b)"), "f(a, b)");
     }
 
     #[test]
