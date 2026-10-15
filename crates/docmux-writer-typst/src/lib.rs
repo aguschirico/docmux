@@ -1316,6 +1316,79 @@ mod tests {
         assert!(typ.contains("Body text."));
     }
 
+    fn cell(text: &str, colspan: u32, rowspan: u32) -> TableCell {
+        TableCell {
+            content: vec![Block::text(text)],
+            colspan,
+            rowspan,
+        }
+    }
+
+    #[test]
+    fn table_is_as_wide_as_its_spanned_cells() {
+        // Two declared columns, but the second row needs three.
+        let table = Table {
+            caption: None,
+            label: None,
+            columns: vec![],
+            header: Some(vec![cell("a", 1, 2), cell("b", 1, 1)]),
+            rows: vec![vec![cell("c", 2, 1)]],
+            foot: None,
+            attrs: None,
+        };
+        assert_eq!(grid_width(&table), 3);
+    }
+
+    #[test]
+    fn a_repeated_label_is_attached_once() {
+        let eq = |content: &str| Block::MathBlock {
+            content: content.into(),
+            label: Some("eq:x".into()),
+        };
+        let doc = Document {
+            content: vec![eq("a"), eq("b")],
+            ..Default::default()
+        };
+        assert_eq!(write_typst(&doc).matches("<eq:x>").count(), 1);
+    }
+
+    #[test]
+    fn heading_with_a_line_break_keeps_its_label() {
+        let doc = Document {
+            content: vec![Block::Heading {
+                level: 1,
+                id: Some("sec:a".into()),
+                content: vec![
+                    Inline::text("First"),
+                    Inline::HardBreak,
+                    Inline::text("second"),
+                ],
+                attrs: None,
+            }],
+            ..Default::default()
+        };
+        let out = write_typst(&doc);
+        assert!(
+            out.lines()
+                .any(|l| l.starts_with("= First") && l.ends_with("second <sec:a>")),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn slash_between_strong_runs_is_not_a_comment() {
+        let strong = |t: &str| Inline::Strong {
+            content: vec![Inline::text(t)],
+        };
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![strong("1"), Inline::text("/"), strong("2")],
+            }],
+            ..Default::default()
+        };
+        assert_eq!(write_typst(&doc).trim(), r"*1*\/*2*");
+    }
+
     #[test]
     fn bare_table_keeps_hash() {
         let doc = Document {
