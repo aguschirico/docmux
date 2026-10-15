@@ -27,6 +27,9 @@ struct Ctx {
     /// Every label defined in the document. A Typst `@ref` to anything else
     /// is a compile error, so dangling references are written as text.
     labels: HashSet<String>,
+    /// Titles of unnumbered headings by label. Typst cannot `@ref` them, so
+    /// a reference links to the heading with its title instead.
+    unnumbered: HashMap<String, Vec<Inline>>,
     /// Labels already attached. Typst rejects a label that occurs twice, and
     /// papers do reuse them, so only the first occurrence keeps it.
     attached: RefCell<HashSet<String>>,
@@ -171,7 +174,7 @@ impl TypstWriter {
                     }
                     let mut item_content = String::new();
                     self.write_blocks_impl(&item.content, opts, &mut item_content, ctx);
-                    out.push_str(item_content.trim());
+                    out.push_str(trim_markup(&item_content));
                     out.push('\n');
                 }
             }
@@ -245,7 +248,7 @@ impl TypstWriter {
                         out.push_str(": ");
                         let mut def_content = String::new();
                         self.write_blocks_impl(def, opts, &mut def_content, ctx);
-                        out.push_str(def_content.trim());
+                        out.push_str(trim_markup(&def_content));
                         out.push('\n');
                     }
                 }
@@ -291,6 +294,7 @@ impl TypstWriter {
                 // `@a-b` would read the `-b` as part of the label.
                 Inline::CrossRef(cr)
                     if ctx.labels.contains(&cr.target)
+                        && !ctx.unnumbered.contains_key(&cr.target)
                         && matches!(cr.form, RefForm::NumberWithType)
                         && inlines.get(k + 1).is_some_and(starts_label_char) =>
                 {
@@ -301,27 +305,53 @@ impl TypstWriter {
         }
     }
 
+    /// `_text_` or `*text*`. Typst only reads the marks next to non-space
+    /// text, so spaces at either end of the content move outside them.
+    fn write_delimited(
+        &self,
+        mark: char,
+        content: &[Inline],
+        opts: &WriteOptions,
+        out: &mut String,
+        ctx: &Ctx,
+    ) {
+        let mut inner = String::new();
+        self.write_inlines_impl(content, opts, &mut inner, ctx);
+        let trimmed = trim_markup(&inner);
+        let start = inner.len() - inner.trim_start().len();
+        let end = start + trimmed.len();
+        if start >= end {
+            if !inner.is_empty() {
+                out.push(' ');
+            }
+            return;
+        }
+        if start > 0 {
+            out.push(' ');
+        }
+        out.push(mark);
+        out.push_str(&inner[start..end]);
+        out.push(mark);
+        if end < inner.len() {
+            out.push(' ');
+        }
+    }
+
     fn write_inline_impl(&self, inline: &Inline, opts: &WriteOptions, out: &mut String, ctx: &Ctx) {
         match inline {
             Inline::Text { value } => {
                 push_text(out, value);
             }
             Inline::SoftBreak => {
-                out.push('\n');
+                // Two newlines in a row would end the paragraph, and with it
+                // any `*` or `_` still open.
+                out.push(if out.ends_with('\n') { ' ' } else { '\n' });
             }
             Inline::HardBreak => {
                 out.push_str("\\ \n");
             }
-            Inline::Emphasis { content } => {
-                out.push('_');
-                self.write_inlines_impl(content, opts, out, ctx);
-                out.push('_');
-            }
-            Inline::Strong { content } => {
-                out.push('*');
-                self.write_inlines_impl(content, opts, out, ctx);
-                out.push('*');
-            }
+            Inline::Emphasis { content } => self.write_delimited('_', content, opts, out, ctx),
+            Inline::Strong { content } => self.write_delimited('*', content, opts, out, ctx),
             Inline::Strikethrough { content } => {
                 out.push_str("#strike[");
                 self.write_inlines_impl(content, opts, out, ctx);
@@ -430,6 +460,12 @@ impl TypstWriter {
                     out.push_str("??");
                     return;
                 }
+                if let Some(title) = ctx.unnumbered.get(&cr.target) {
+                    out.push_str(&format!("#link(<{label}>)["));
+                    self.write_inlines_impl(title, opts, out, ctx);
+                    out.push(']');
+                    return;
+                }
                 match &cr.form {
                     // `Table~\ref{t}`: the source already names the kind.
                     RefForm::Number | RefForm::Page => {
@@ -450,7 +486,7 @@ impl TypstWriter {
                     out.push_str("#footnote[");
                     let mut inner = String::new();
                     self.write_blocks_impl(content, opts, &mut inner, ctx);
-                    out.push_str(inner.trim());
+                    out.push_str(trim_markup(&inner));
                     out.push(']');
                 }
             }
@@ -481,7 +517,15 @@ impl TypstWriter {
                 out.push_str("],\n");
             }
         }
-        let ncols = table.columns.len().max(grid_width(table)).max(1);
+        let widths = row_widths(table);
+        let ncols = widths
+            .iter()
+            .copied()
+            .chain([table.columns.len(), 1])
+            .max()
+            .unwrap_or(1);
+        // Empty cells that complete each row, in the order rows are written.
+        let mut padding = widths.iter().map(|w| ncols - w);
         let hash = if has_wrapper { "" } else { "#" };
         out.push_str(&format!("{hash}table(\n  columns: {ncols},\n"));
 
@@ -504,37 +548,33 @@ impl TypstWriter {
             out.push_str("),\n");
         }
 
-        if let Some(header) = &table.header {
-            out.push_str("  table.header(\n");
-            for cell in header {
-                out.push_str(&cell_open(cell, "    "));
+        let mut write_row = |row: &[TableCell], indent: &str, out: &mut String| {
+            for cell in row {
+                out.push_str(&cell_open(cell, indent));
                 let mut cell_content = String::new();
                 self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
-                out.push_str(cell_content.trim());
+                out.push_str(trim_markup(&cell_content));
                 out.push_str("],\n");
             }
+            for _ in 0..padding.next().unwrap_or(0) {
+                out.push_str(indent);
+                out.push_str("[],\n");
+            }
+        };
+
+        if let Some(header) = &table.header {
+            out.push_str("  table.header(\n");
+            write_row(header, "    ", out);
             out.push_str("  ),\n");
         }
 
         for row in &table.rows {
-            for cell in row {
-                out.push_str(&cell_open(cell, "  "));
-                let mut cell_content = String::new();
-                self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
-                out.push_str(cell_content.trim());
-                out.push_str("],\n");
-            }
+            write_row(row, "  ", out);
         }
 
         if let Some(foot) = &table.foot {
             out.push_str("  table.footer(\n");
-            for cell in foot {
-                out.push_str(&cell_open(cell, "    "));
-                let mut cell_content = String::new();
-                self.write_blocks_impl(&cell.content, opts, &mut cell_content, ctx);
-                out.push_str(cell_content.trim());
-                out.push_str("],\n");
-            }
+            write_row(foot, "    ", out);
             out.push_str("  ),\n");
         }
 
@@ -622,6 +662,7 @@ impl Writer for TypstWriter {
         let ctx = Ctx {
             footnotes: collect_footnotes(&doc.content),
             labels: labels.iter().map(|(_, l)| l.clone()).collect(),
+            unnumbered: unnumbered_headings(&doc.content),
             attached: RefCell::default(),
         };
         let mut body = String::with_capacity(4096);
@@ -636,10 +677,11 @@ impl Writer for TypstWriter {
     }
 }
 
-/// The number of columns the cells occupy once column and row spans are laid
-/// out. Typst rejects a cell whose span runs past the last column, and papers
-/// often declare fewer columns than their rows use.
-fn grid_width(table: &Table) -> usize {
+/// How many columns each row fills once column and row spans are laid out,
+/// in order: header, body rows, footer. Typst places cells one after another
+/// and wraps on its own, so short rows must be padded and the column count
+/// must cover the widest row: papers often declare fewer columns than they use.
+fn row_widths(table: &Table) -> Vec<usize> {
     let rows = table
         .header
         .iter()
@@ -647,8 +689,9 @@ fn grid_width(table: &Table) -> usize {
         .chain(table.foot.iter());
     // Rows still covered by a rowspan from above, per column.
     let mut covered: Vec<u32> = Vec::new();
-    let mut width = 0;
+    let mut widths = Vec::new();
     for row in rows {
+        let mut used = covered.iter().filter(|&&n| n > 0).count();
         let mut col = 0;
         for cell in row {
             while covered.get(col).is_some_and(|&n| n > 0) {
@@ -659,18 +702,18 @@ fn grid_width(table: &Table) -> usize {
                 covered.resize(col + span, 0);
             }
             for c in &mut covered[col..col + span] {
+                // Counted down below, so this row's own cells end at zero.
                 *c = cell.rowspan.max(1);
             }
             col += span;
+            used += span;
         }
-        width = width
-            .max(col)
-            .max(covered.iter().rposition(|&n| n > 0).map_or(0, |p| p + 1));
+        widths.push(used.max(col));
         for c in &mut covered {
             *c = c.saturating_sub(1);
         }
     }
-    width
+    widths
 }
 
 /// Opening of a table cell: `[` or `table.cell(colspan: 2)[`.
@@ -713,12 +756,31 @@ fn title_block(doc: &Document) -> String {
     format!("#align(center)[\n{}\n]\n\n", lines.join(" \\\n"))
 }
 
+/// Written markup without surrounding whitespace, except the space of a
+/// trailing `\ ` line break: without it the `\` would escape whatever
+/// closes the content next (`]`, `*`, `_`).
+fn trim_markup(s: &str) -> &str {
+    let trimmed = s.trim();
+    let backslashes = trimmed.chars().rev().take_while(|&c| c == '\\').count();
+    if backslashes % 2 == 1 {
+        let start = s.len() - s.trim_start().len();
+        &s[start..start + trimmed.len() + 1]
+    } else {
+        trimmed
+    }
+}
+
 fn starts_label_char(inline: &Inline) -> bool {
     matches!(inline, Inline::Text { value } if value.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-'))
 }
 
 fn starts_alphanumeric(inline: &Inline) -> bool {
-    matches!(inline, Inline::Text { value } if value.chars().next().is_some_and(char::is_alphanumeric))
+    match inline {
+        Inline::Text { value } => value.chars().next().is_some_and(char::is_alphanumeric),
+        // A span is written as its content, with nothing in front.
+        Inline::Span { content, .. } => content.first().is_some_and(starts_alphanumeric),
+        _ => false,
+    }
 }
 
 // ─── Numbering ───────────────────────────────────────────────────────────────
@@ -754,6 +816,35 @@ enum LabelKind {
     Heading,
     Equation,
     Other,
+}
+
+fn unnumbered_headings(blocks: &[Block]) -> HashMap<String, Vec<Inline>> {
+    fn walk(blocks: &[Block], out: &mut HashMap<String, Vec<Inline>>) {
+        for block in blocks {
+            match block {
+                Block::Heading {
+                    id: Some(id),
+                    content,
+                    attrs: Some(attrs),
+                    ..
+                } if attrs.classes.iter().any(|c| c == "unnumbered") => {
+                    out.insert(id.clone(), content.clone());
+                }
+                Block::Div { content, .. }
+                | Block::BlockQuote { content }
+                | Block::Admonition { content, .. } => walk(content, out),
+                Block::List { items, .. } => {
+                    for item in items {
+                        walk(&item.content, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = HashMap::new();
+    walk(blocks, &mut out);
+    out
 }
 
 /// Every label the writer emits, with the kind of element it is attached to.
@@ -1336,7 +1427,57 @@ mod tests {
             foot: None,
             attrs: None,
         };
-        assert_eq!(grid_width(&table), 3);
+        assert_eq!(row_widths(&table), vec![2, 3]);
+    }
+
+    #[test]
+    fn short_rows_are_padded_so_later_cells_stay_in_place() {
+        let table = Table {
+            caption: None,
+            label: None,
+            columns: vec![],
+            header: None,
+            rows: vec![
+                vec![cell("a", 1, 1), cell("b", 1, 1), cell("c", 1, 1)],
+                vec![cell("d", 1, 1)],
+                vec![cell("e", 3, 1)],
+            ],
+            foot: None,
+            attrs: None,
+        };
+        let doc = Document {
+            content: vec![Block::Table(table)],
+            ..Default::default()
+        };
+        let out = write_typst(&doc);
+        assert!(
+            out.contains("[d],\n  [],\n  [],\n  table.cell(colspan: 3)[e]"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_cell_ending_in_a_line_break_still_closes() {
+        let table = Table {
+            caption: None,
+            label: None,
+            columns: vec![],
+            header: None,
+            rows: vec![vec![TableCell {
+                content: vec![Block::Paragraph {
+                    content: vec![Inline::text("Buy"), Inline::HardBreak],
+                }],
+                colspan: 1,
+                rowspan: 1,
+            }]],
+            foot: None,
+            attrs: None,
+        };
+        let doc = Document {
+            content: vec![Block::Table(table)],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).contains("[Buy\\ ],"));
     }
 
     #[test]
@@ -1387,6 +1528,70 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(write_typst(&doc).trim(), r"*1*\/*2*");
+    }
+
+    #[test]
+    fn reference_to_an_unnumbered_heading_links_to_its_title() {
+        let doc = Document {
+            content: vec![
+                Block::Heading {
+                    level: 1,
+                    id: Some("sec:safety".into()),
+                    content: vec![Inline::text("Safety")],
+                    attrs: Some(Attributes {
+                        id: None,
+                        classes: vec!["unnumbered".into()],
+                        key_values: HashMap::new(),
+                    }),
+                },
+                Block::Paragraph {
+                    content: vec![
+                        Inline::text("See "),
+                        Inline::CrossRef(CrossRef {
+                            target: "sec:safety".into(),
+                            form: RefForm::NumberWithType,
+                        }),
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).contains("See #link(<sec:safety>)[Safety]"));
+    }
+
+    #[test]
+    fn emphasis_marks_hug_the_text() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![
+                    Inline::text("A "),
+                    Inline::Emphasis {
+                        content: vec![Inline::text(" graph ")],
+                    },
+                    Inline::text(", or"),
+                ],
+            }],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).contains(" _graph_ "));
+    }
+
+    #[test]
+    fn strong_text_never_contains_a_blank_line() {
+        let doc = Document {
+            content: vec![Block::Paragraph {
+                content: vec![Inline::Strong {
+                    content: vec![
+                        Inline::text("Dear"),
+                        Inline::SoftBreak,
+                        Inline::SoftBreak,
+                        Inline::text("recruiter"),
+                    ],
+                }],
+            }],
+            ..Default::default()
+        };
+        assert!(!write_typst(&doc).trim().contains("\n\n"));
     }
 
     #[test]
