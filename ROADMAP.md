@@ -24,8 +24,8 @@ Shipped through Phases 1 to 3, plus what came after:
 - **AST:** pandoc's block and inline model, including `Div`, `Span`, `Underline`, `Quoted`, attributes on headings, code, links, images, tables and figures, list styles and delimiters, table footers, per-key citation prefixes and suffixes. docmux extras: `MathBlock`, `CrossRef`, `Admonition`, `FootnoteDef`.
 - **CLI:** `--standalone`, `--template`, `--toc`, `-N`, `--top-level-division`, `--bibliography`, `--csl`, `--nocite`, `--math`, `--css`, `-M`, `--variable`, `--wrap`, `--columns`, `--eol`, `--highlight-style`, `--section-divs`, `--id-prefix`, `--shift-heading-level-by`, stdin and multiple inputs, `-t json` (docmux AST).
 - **Transforms:** CSL citations (hayagriva), cross-references, table of contents, section numbering, section divs, LaTeX/Typst/MathML math.
-- **LaTeX as people write it:** user macros expanded, `\input`/`\include` followed, citations resolved from the `.bbl`, checked against 245 arXiv papers across fields, most of them sampled at random, whose Typst output compiles.
-- **Word:** math as native OMML equations (108,734 across the corpus, checked on every run by reading them back with pandoc), bookmarks and internal links.
+- **LaTeX as people write it:** user macros expanded, `\input`/`\include` followed, citations resolved from the `.bbl`, checked against 397 arXiv papers across fields, most of them sampled at random, whose Typst output compiles.
+- **Word:** math as native OMML equations (178,132 across the corpus, checked on every run by reading them back with pandoc), bookmarks and internal links.
 - **Packaging:** `@docmux/wasm` on npm (trusted publishing, staged releases), 26 crates on crates.io, playground and landing at [docmux.pages.dev](https://docmux.pages.dev).
 
 The detailed Phase 1 to 3 checklists are in the git history of this file.
