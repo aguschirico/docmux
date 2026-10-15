@@ -2,6 +2,7 @@
 //!
 //! Typst writer for docmux. Converts the docmux AST into Typst markup.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use docmux_ast::*;
@@ -26,6 +27,21 @@ struct Ctx {
     /// Every label defined in the document. A Typst `@ref` to anything else
     /// is a compile error, so dangling references are written as text.
     labels: HashSet<String>,
+    /// Labels already attached. Typst rejects a label that occurs twice, and
+    /// papers do reuse them, so only the first occurrence keeps it.
+    attached: RefCell<HashSet<String>>,
+}
+
+impl Ctx {
+    /// ` <label>` to attach after an element, or nothing if an earlier
+    /// element already has this label.
+    fn attach(&self, label: &str) -> String {
+        if self.attached.borrow_mut().insert(label.to_string()) {
+            format!(" <{}>", typst_label(label))
+        } else {
+            String::new()
+        }
+    }
 }
 
 /// A Typst writer.
@@ -64,19 +80,22 @@ impl TypstWriter {
                 let unnumbered = attrs
                     .as_ref()
                     .is_some_and(|a| a.classes.iter().any(|c| c == "unnumbered"));
+                // A `=` heading ends at the end of its line, so a line break
+                // in the title would leave the rest, and the label, outside it.
+                let mut title = String::new();
+                self.write_inlines_impl(content, opts, &mut title, ctx);
+                let title = title.replace('\n', " ");
                 if unnumbered {
-                    out.push_str(&format!("#heading(level: {level}, numbering: none)["));
-                    self.write_inlines_impl(content, opts, out, ctx);
-                    out.push(']');
+                    out.push_str(&format!(
+                        "#heading(level: {level}, numbering: none)[{title}]"
+                    ));
                 } else {
-                    for _ in 0..*level {
-                        out.push('=');
-                    }
+                    out.push_str(&"=".repeat(*level as usize));
                     out.push(' ');
-                    self.write_inlines_impl(content, opts, out, ctx);
+                    out.push_str(&title);
                 }
                 if let Some(id) = id {
-                    out.push_str(&format!(" <{}>", typst_label(id)));
+                    out.push_str(&ctx.attach(id));
                 }
                 out.push('\n');
             }
@@ -109,7 +128,7 @@ impl TypstWriter {
                 if caption.is_some() || label.is_some() {
                     out.push(']');
                     if let Some(label) = label {
-                        out.push_str(&format!(" <{}>", typst_label(label)));
+                        out.push_str(&ctx.attach(label));
                     }
                     out.push('\n');
                 }
@@ -119,7 +138,7 @@ impl TypstWriter {
                 out.push_str(content.trim());
                 out.push_str("\n$");
                 if let Some(label) = label {
-                    out.push_str(&format!(" <{}>", typst_label(label)));
+                    out.push_str(&ctx.attach(label));
                 }
                 out.push('\n');
             }
@@ -179,7 +198,7 @@ impl TypstWriter {
                 }
                 out.push(')');
                 if let Some(label) = label {
-                    out.push_str(&format!(" <{}>", typst_label(label)));
+                    out.push_str(&ctx.attach(label));
                 }
                 out.push('\n');
             }
@@ -236,7 +255,7 @@ impl TypstWriter {
                 Some(id) => {
                     out.push_str("#block[\n");
                     self.write_blocks_impl(content, opts, out, ctx);
-                    out.push_str(&format!("] <{}>\n\n", typst_label(id)));
+                    out.push_str(&format!("]{}\n\n", ctx.attach(id)));
                 }
                 None => self.write_blocks_impl(content, opts, out, ctx),
             },
@@ -462,14 +481,7 @@ impl TypstWriter {
                 out.push_str("],\n");
             }
         }
-        let ncols = table.columns.len().max(
-            table
-                .header
-                .as_ref()
-                .map(|h| h.len())
-                .or_else(|| table.rows.first().map(|r| r.len()))
-                .unwrap_or(1),
-        );
+        let ncols = table.columns.len().max(grid_width(table)).max(1);
         let hash = if has_wrapper { "" } else { "#" };
         out.push_str(&format!("{hash}table(\n  columns: {ncols},\n"));
 
@@ -530,7 +542,7 @@ impl TypstWriter {
         if has_wrapper {
             out.push(')');
             if let Some(label) = &table.label {
-                out.push_str(&format!(" <{}>", typst_label(label)));
+                out.push_str(&ctx.attach(label));
             }
         }
         out.push('\n');
@@ -610,6 +622,7 @@ impl Writer for TypstWriter {
         let ctx = Ctx {
             footnotes: collect_footnotes(&doc.content),
             labels: labels.iter().map(|(_, l)| l.clone()).collect(),
+            attached: RefCell::default(),
         };
         let mut body = String::with_capacity(4096);
         body.push_str(&numbering_rules(&doc.content, &labels));
@@ -621,6 +634,43 @@ impl Writer for TypstWriter {
             Ok(body)
         }
     }
+}
+
+/// The number of columns the cells occupy once column and row spans are laid
+/// out. Typst rejects a cell whose span runs past the last column, and papers
+/// often declare fewer columns than their rows use.
+fn grid_width(table: &Table) -> usize {
+    let rows = table
+        .header
+        .iter()
+        .chain(table.rows.iter())
+        .chain(table.foot.iter());
+    // Rows still covered by a rowspan from above, per column.
+    let mut covered: Vec<u32> = Vec::new();
+    let mut width = 0;
+    for row in rows {
+        let mut col = 0;
+        for cell in row {
+            while covered.get(col).is_some_and(|&n| n > 0) {
+                col += 1;
+            }
+            let span = cell.colspan.max(1) as usize;
+            if covered.len() < col + span {
+                covered.resize(col + span, 0);
+            }
+            for c in &mut covered[col..col + span] {
+                *c = cell.rowspan.max(1);
+            }
+            col += span;
+        }
+        width = width
+            .max(col)
+            .max(covered.iter().rposition(|&n| n > 0).map_or(0, |p| p + 1));
+        for c in &mut covered {
+            *c = c.saturating_sub(1);
+        }
+    }
+    width
 }
 
 /// Opening of a table cell: `[` or `table.cell(colspan: 2)[`.
@@ -820,13 +870,23 @@ pub fn escape_typst(s: &str) -> String {
 /// Append escaped text, also escaping markers that Typst only interprets at
 /// the start of a line (`- `, `+ `, `= `, `/ `, `1. `).
 fn push_text(out: &mut String, value: &str) {
-    let escaped = escape_typst(value);
+    let mut escaped = escape_typst(value);
+    // `/` next to the `*` of strong text, or to another `/`, opens or closes
+    // a comment: `*a*/*b*`. Within one text node `escape_typst` handles it.
+    if escaped.starts_with('/') && (out.ends_with('*') || out.ends_with('/')) {
+        escaped.insert(0, '\\');
+    }
+    if escaped.ends_with('/') && !escaped.ends_with("\\/") {
+        escaped.insert(escaped.len() - 1, '\\');
+    }
     if out.ends_with(']') || out.ends_with(')') {
         // Right after an embedded expression (`#link(..)[..]`), `;` ends the
-        // expression, `(` and `[` continue the call, `.x` is a field access.
+        // expression, `(` and `[` continue the call, `.x` is a field access
+        // (the `x` may come in the next text node).
         let mut chars = escaped.chars();
         let continues = match (chars.next(), chars.next()) {
             (Some(';' | '(' | '['), _) => true,
+            (Some('.'), None) => true,
             (Some('.'), Some(c)) => c.is_alphanumeric(),
             _ => false,
         };
