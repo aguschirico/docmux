@@ -12,7 +12,7 @@ docmux converts between markup formats with a **Reader → AST → Writer** pipe
 
 ## Tested on real papers
 
-Unit tests pass long before real documents do, so docmux is also checked against the LaTeX sources of eight arXiv papers (VAE, Adam, ResNet, Transformer, BERT, GPT-3, DDPM, LoRA). The Typst output of all eight compiles with no errors and no leftover LaTeX commands, and their Word output has every equation as a native Word equation. The harness lives in [`scripts/corpus/`](scripts/corpus/); the sources are downloaded, not committed.
+Unit tests pass long before real documents do, so docmux is also checked against the LaTeX sources of 104 arXiv papers, from machine learning (Transformer, GPT-3, ResNet) to mathematics (Perelman's Ricci flow, Viazovska's sphere packing), physics (the CMS Higgs observation) and astronomy (Planck 2018), written between 1998 and 2023. The Typst output of all 104 compiles with no errors and no leftover LaTeX commands, and their Word output carries 50,899 equations as native Word math, read back independently with pandoc. The harness lives in [`scripts/corpus/`](scripts/corpus/); the sources are downloaded, not committed.
 
 ## Supported formats
 
