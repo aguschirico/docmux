@@ -1,8 +1,9 @@
 # Real-document corpus
 
-A regression check against real arXiv papers, not just unit fixtures: 104
-papers across machine learning, mathematics, physics, astronomy, statistics
-and biology, written between 1998 and 2023.
+A regression check against real arXiv papers, not just unit fixtures: 245
+papers written between 1998 and 2025. About a hundred are well-known papers
+across machine learning, mathematics, physics, astronomy, statistics and
+biology; the rest are a random sample from across arXiv (`sample.py`).
 
 ```sh
 cargo build --release -p docmux-cli
@@ -22,10 +23,11 @@ The bar is 0 errors and 0 leaks for every paper. A command the source itself
 prints as text (`{\textbackslash}name`) is not a leak. Sources are not
 committed (arXiv licenses vary).
 
-To add papers:
+To add papers, by id or at random:
 
 ```sh
 python3 scripts/corpus/add.py 1406.2661 hep-th/9711200
+python3 scripts/corpus/add.py $(python3 scripts/corpus/sample.py --count 240 --seed 2)
 ```
 
 It downloads each source, finds the main `.tex` file and takes the short name
