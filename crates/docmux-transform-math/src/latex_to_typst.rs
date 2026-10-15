@@ -516,7 +516,9 @@ fn decoration(name: &str, tokens: &[Token], i: &mut usize) -> Option<String> {
             return Some(if inner.is_empty() {
                 String::new()
             } else {
-                format!("#hide(${inner}$)")
+                // The space ends the code expression: `#hide($x$)(y)` would
+                // read `(y)` as more arguments.
+                format!("#hide(${inner}$) ")
             });
         }
         _ => LATEX_TO_TYPST_FUNCTIONS.get(name).copied()?,

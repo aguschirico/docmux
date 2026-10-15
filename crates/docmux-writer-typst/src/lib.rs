@@ -39,8 +39,10 @@ impl Ctx {
     /// ` <label>` to attach after an element, or nothing if an earlier
     /// element already has this label.
     fn attach(&self, label: &str) -> String {
-        if self.attached.borrow_mut().insert(label.to_string()) {
-            format!(" <{}>", typst_label(label))
+        // Compared after sanitizing: `lem:1*` and `lem:1?` both become `lem-1-`.
+        let label = typst_label(label);
+        if self.attached.borrow_mut().insert(label.clone()) {
+            format!(" <{label}>")
         } else {
             String::new()
         }
@@ -906,11 +908,15 @@ fn collect_ref_targets(blocks: &[Block], out: &mut Vec<String>) {
                 ..
             } => collect_inline_targets(caption, out),
             Block::Table(table) => {
+                if let Some(caption) = &table.caption {
+                    collect_inline_targets(caption, out);
+                }
                 let cells = table
                     .header
                     .iter()
                     .flatten()
-                    .chain(table.rows.iter().flatten());
+                    .chain(table.rows.iter().flatten())
+                    .chain(table.foot.iter().flatten());
                 for cell in cells {
                     collect_ref_targets(&cell.content, out);
                 }
@@ -1479,6 +1485,47 @@ mod tests {
             ..Default::default()
         };
         assert!(write_typst(&doc).contains("[Buy\\ ],"));
+    }
+
+    #[test]
+    fn labels_that_sanitize_alike_are_attached_once() {
+        let eq = |label: &str| Block::MathBlock {
+            content: "a".into(),
+            label: Some(label.into()),
+        };
+        let doc = Document {
+            content: vec![eq("lem:1*"), eq("lem:1?")],
+            ..Default::default()
+        };
+        assert_eq!(write_typst(&doc).matches("<lem:1->").count(), 1);
+    }
+
+    #[test]
+    fn a_reference_in_a_table_caption_numbers_headings() {
+        let doc = Document {
+            content: vec![
+                Block::Heading {
+                    level: 1,
+                    id: Some("sec:a".into()),
+                    content: vec![Inline::text("A")],
+                    attrs: None,
+                },
+                Block::Table(Table {
+                    caption: Some(vec![Inline::CrossRef(CrossRef {
+                        target: "sec:a".into(),
+                        form: RefForm::Number,
+                    })]),
+                    label: None,
+                    columns: vec![],
+                    header: None,
+                    rows: vec![vec![cell("x", 1, 1)]],
+                    foot: None,
+                    attrs: None,
+                }),
+            ],
+            ..Default::default()
+        };
+        assert!(write_typst(&doc).starts_with("#set heading(numbering"));
     }
 
     #[test]
