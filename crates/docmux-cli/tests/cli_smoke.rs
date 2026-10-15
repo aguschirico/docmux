@@ -50,6 +50,24 @@ fn converts_markdown_to_html_stdout() {
 }
 
 #[test]
+fn reads_latin1_input() {
+    let tmp_dir = std::env::temp_dir().join("docmux-test-latin1");
+    std::fs::create_dir_all(&tmp_dir).ok();
+    let input = tmp_dir.join("latin1.tex");
+    // "Caf\xe9" in Latin-1, which is not valid UTF-8.
+    std::fs::write(&input, b"Caf\xe9 au lait.").unwrap();
+    let output = Command::new(docmux_bin())
+        .arg(&input)
+        .args(["-t", "markdown"])
+        .output()
+        .expect("failed to run docmux");
+
+    assert!(output.status.success(), "docmux exited with error");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Caf\u{e9} au lait."), "got: {stdout}");
+}
+
+#[test]
 fn converts_to_file_output() {
     let input = fixtures_dir().join("basic/heading.md");
     let tmp_dir = std::env::temp_dir().join("docmux-test");

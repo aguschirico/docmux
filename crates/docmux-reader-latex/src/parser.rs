@@ -801,6 +801,12 @@ impl Parser {
                 let content = self.parse_inline_content();
                 Some(Inline::SmallCaps { content })
             }
+            // hyperref's {TeX version}{PDF bookmark version}: keep the first.
+            "texorpdfstring" => {
+                let content = self.parse_inline_content();
+                self.parse_brace_argument();
+                Self::span_of(content)
+            }
             "textsuperscript" => {
                 let content = self.parse_inline_content();
                 Some(Inline::Superscript { content })
@@ -2130,6 +2136,19 @@ mod tests {
             _ => None,
         });
         assert_eq!(label.map(String::as_str), Some("Konečný et al.(2015)"));
+    }
+
+    #[test]
+    fn texorpdfstring_keeps_the_tex_version() {
+        let input = r"\section{The \texorpdfstring{$\Lambda$CDM}{LCDM} model}";
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Heading { content, .. } = &doc.content[0] else {
+            panic!("expected a heading, got {:?}", doc.content);
+        };
+        assert_eq!(
+            docmux_ast::inlines_to_plain_text(content),
+            r"The \LambdaCDM model"
+        );
     }
 
     #[test]

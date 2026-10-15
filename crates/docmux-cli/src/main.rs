@@ -300,7 +300,7 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                match std::fs::read_to_string(path) {
+                match read_text(path) {
                     Ok(s) => combined_input.push_str(&s),
                     Err(e) => {
                         eprintln!("docmux: error reading {}: {e}", path.display());
@@ -943,7 +943,7 @@ fn load_latex_includes_from_disk(
             base_dir.join(format!("{key}.ltx")),
         ];
         for cand in &candidates {
-            if let Ok(content) = std::fs::read_to_string(cand) {
+            if let Ok(content) = read_text(cand) {
                 queue.extend(scan_latex_includes(&content));
                 files.insert(key.clone(), content);
                 break;
@@ -951,6 +951,25 @@ fn load_latex_includes_from_disk(
         }
     }
     files
+}
+
+/// Read a text input. Older sources are often Latin-1 rather than UTF-8:
+/// those are decoded as Latin-1 with a warning instead of failing.
+fn read_text(path: &std::path::Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(text
+            .strip_prefix('\u{FEFF}')
+            .map(str::to_string)
+            .unwrap_or(text)),
+        Err(err) => {
+            eprintln!(
+                "docmux: warning: {} is not valid UTF-8, reading it as Latin-1",
+                path.display()
+            );
+            Ok(err.into_bytes().iter().map(|&b| char::from(b)).collect())
+        }
+    }
 }
 
 /// Load the `.bbl` files BibTeX wrote for this document: one per
@@ -980,7 +999,7 @@ fn load_bbl_from_disk(
         if files.contains_key(&key) {
             continue;
         }
-        if let Ok(content) = std::fs::read_to_string(base_dir.join(&key)) {
+        if let Ok(content) = read_text(&base_dir.join(&key)) {
             files.insert(key, content);
         }
     }
