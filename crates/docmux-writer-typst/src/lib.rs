@@ -343,9 +343,10 @@ impl TypstWriter {
                 push_text(out, value);
             }
             Inline::SoftBreak => {
-                // Two newlines in a row would end the paragraph, and with it
-                // any `*` or `_` still open.
-                out.push(if out.ends_with('\n') { ' ' } else { '\n' });
+                // A blank line would end the paragraph, and with it any `*` or
+                // `_` still open: never break after a line that is only spaces.
+                let line_blank = out.rsplit('\n').next().is_some_and(|l| l.trim().is_empty());
+                out.push(if line_blank { ' ' } else { '\n' });
             }
             Inline::HardBreak => {
                 out.push_str("\\ \n");
@@ -1584,6 +1585,9 @@ mod tests {
                     content: vec![
                         Inline::text("Dear"),
                         Inline::SoftBreak,
+                        Inline::SoftBreak,
+                        Inline::HardBreak,
+                        Inline::text(" "),
                         Inline::SoftBreak,
                         Inline::text("recruiter"),
                     ],
