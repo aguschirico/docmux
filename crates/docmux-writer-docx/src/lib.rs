@@ -233,7 +233,7 @@ impl DocxBuilder {
             Block::CodeBlock { content, .. } => {
                 for line in content.lines() {
                     self.body_xml
-                        .push_str("<w:p><w:pPr><w:pStyle w:val=\"CodeBlock\"/></w:pPr>");
+                        .push_str("<w:p><w:pPr><w:pStyle w:val=\"SourceCode\"/></w:pPr>");
                     self.body_xml.push_str("<w:r><w:t xml:space=\"preserve\">");
                     self.body_xml.push_str(&xml_escape(line));
                     self.body_xml.push_str("</w:t></w:r></w:p>\n");
@@ -794,8 +794,10 @@ impl DocxBuilder {
                 self.write_inlines(content, &props);
             }
             Inline::Code { value, .. } => {
-                self.body_xml.push_str("<w:r><w:rPr>");
-                for prop in run_props {
+                // The style comes first in <w:rPr>, as the schema orders it.
+                self.body_xml
+                    .push_str("<w:r><w:rPr><w:rStyle w:val=\"VerbatimChar\"/>");
+                for prop in run_props.iter().filter(|p| !p.starts_with("<w:rStyle")) {
                     self.body_xml.push_str(prop);
                 }
                 self.body_xml
@@ -1354,8 +1356,8 @@ mod tests {
             "styles.xml missing Heading1 style"
         );
         assert!(
-            styles_xml.contains("w:styleId=\"CodeBlock\""),
-            "styles.xml missing CodeBlock style"
+            styles_xml.contains("w:styleId=\"SourceCode\""),
+            "styles.xml missing SourceCode style"
         );
         assert!(
             styles_xml.contains("w:styleId=\"Hyperlink\""),
@@ -1471,8 +1473,8 @@ mod tests {
         let bytes = w.write_bytes(&doc, &WriteOptions::default()).unwrap();
         let xml = extract_document_xml(&bytes);
         assert!(
-            xml.contains(r#"<w:pStyle w:val="CodeBlock"/>"#),
-            "missing CodeBlock style, got:\n{xml}"
+            xml.contains(r#"<w:pStyle w:val="SourceCode"/>"#),
+            "missing SourceCode style, got:\n{xml}"
         );
         assert!(
             xml.contains("fn main() {}"),

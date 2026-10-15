@@ -107,7 +107,7 @@ Inline math: $E = mc^2$ and a footnote[^1].
     assert!(doc_xml.contains("<w:numPr>"), "missing list numbering");
 
     // Code block
-    assert!(doc_xml.contains(r#"<w:pStyle w:val="CodeBlock"/>"#));
+    assert!(doc_xml.contains(r#"<w:pStyle w:val="SourceCode"/>"#));
 
     // Table
     assert!(doc_xml.contains("<w:tbl>"), "missing table");

@@ -218,9 +218,9 @@
     </w:rPr>
   </w:style>
 
-  <!-- CodeBlock -->
-  <w:style w:type="paragraph" w:styleId="CodeBlock">
-    <w:name w:val="Code Block"/>
+  <!-- Source Code: pandoc's name, so pandoc reads these paragraphs as code -->
+  <w:style w:type="paragraph" w:styleId="SourceCode">
+    <w:name w:val="Source Code"/>
     <w:basedOn w:val="Normal"/>
     <w:next w:val="Normal"/>
     <w:pPr>
@@ -320,9 +320,9 @@
     </w:rPr>
   </w:style>
 
-  <!-- CodeChar (character style for inline code) -->
-  <w:style w:type="character" w:styleId="CodeChar">
-    <w:name w:val="Code Char"/>
+  <!-- Verbatim Char: inline code, under pandoc's name -->
+  <w:style w:type="character" w:styleId="VerbatimChar">
+    <w:name w:val="Verbatim Char"/>
     <w:rPr>
       <w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:cs="Consolas"/>
       <w:sz w:val="20"/>
