@@ -27,6 +27,18 @@ const SILENTLY_IGNORED: &[&str] = &[
 
 /// A `\\bibitem[label]` label as plain text: `ADG$^{+}$16` → `ADG+16`,
 /// `Akbik et~al.(2018)Akbik, …` keeps its natbib shape.
+/// A URL as written in a `\url` or `\href` argument. Inside another
+/// command's argument TeX has already read `\textasciitilde` and `\%` as
+/// commands, so they stand for `~` and `%`.
+fn url_text(raw: &str) -> String {
+    let tilde = raw
+        .replace("\\textasciitilde{}", "~")
+        .replace("\\textasciitilde ", "~")
+        .replace("\\textasciitilde", "~")
+        .replace("\\~{}", "~");
+    unescape_latex(&tilde)
+}
+
 fn clean_bib_label(label: &str) -> String {
     let text: String = label
         .chars()
@@ -297,9 +309,18 @@ impl Parser {
     /// dropped.
     fn parse_optional_text(&mut self) -> Option<String> {
         let tokens = self.parse_optional_tokens()?;
-        Some(docmux_ast::inlines_to_plain_text(
-            &self.inlines_from_tokens(tokens),
-        ))
+        let inlines: Vec<Inline> = self
+            .inlines_from_tokens(tokens)
+            .into_iter()
+            // Math can only be approximated in a string: `$4.4\,\sigma$` → `4.4 σ`.
+            .map(|inline| match inline {
+                Inline::MathInline { value } => Inline::Text {
+                    value: docmux_transform_math::latex_to_text::latex_to_text(&value),
+                },
+                other => other,
+            })
+            .collect();
+        Some(docmux_ast::inlines_to_plain_text(&inlines))
     }
 
     /// If the next token is `BracketOpen`, consume `[...]` and return the
@@ -816,7 +837,7 @@ impl Parser {
                 Some(Inline::Subscript { content })
             }
             "href" => {
-                let url = self.parse_brace_text();
+                let url = url_text(&self.parse_brace_text());
                 let content = self.parse_inline_content();
                 Some(Inline::Link {
                     url,
@@ -826,7 +847,7 @@ impl Parser {
                 })
             }
             "url" => {
-                let url = self.parse_brace_text();
+                let url = url_text(&self.parse_brace_text());
                 Some(Inline::Link {
                     url: url.clone(),
                     title: None,
@@ -2163,6 +2184,37 @@ mod tests {
             content
                 .iter()
                 .any(|i| matches!(i, Inline::FootnoteRef { .. })),
+            "{content:?}"
+        );
+    }
+
+    #[test]
+    fn math_in_a_citation_note_becomes_text() {
+        let input = r"See \citet[][a value of $y_\mathrm{DP}$ at 4.4\thinspace$\sigma$]{k}.";
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected a paragraph, got {:?}", doc.content);
+        };
+        let Some(Inline::Citation(cite)) =
+            content.iter().find(|i| matches!(i, Inline::Citation(_)))
+        else {
+            panic!("expected a citation, got {content:?}");
+        };
+        assert_eq!(
+            cite.items[0].suffix.as_deref(),
+            Some("a value of y_DP at 4.4\u{2009}σ")
+        );
+    }
+
+    #[test]
+    fn url_resolves_tilde_and_escapes() {
+        let input = r"\url{http://www.sfu.ca/\textasciitilde aha25/MG\%20CAMB.html}";
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected a paragraph, got {:?}", doc.content);
+        };
+        assert!(
+            matches!(&content[0], Inline::Link { url, .. } if url == "http://www.sfu.ca/~aha25/MG%20CAMB.html"),
             "{content:?}"
         );
     }

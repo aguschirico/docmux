@@ -6,6 +6,7 @@
 
 pub mod latex_to_mathml;
 pub mod latex_to_omml;
+pub mod latex_to_text;
 pub mod latex_to_typst;
 pub mod tables;
 pub mod tokenizer;

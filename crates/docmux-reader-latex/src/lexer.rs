@@ -103,34 +103,12 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 if i + 1 < len && chars[i + 1] == '$' {
                     // Display math: $$...$$
                     i += 2;
-                    let mut math = String::new();
-                    while i < len {
-                        if chars[i] == '$' && i + 1 < len && chars[i + 1] == '$' {
-                            i += 2;
-                            break;
-                        }
-                        if chars[i] == '\n' {
-                            line += 1;
-                        }
-                        math.push(chars[i]);
-                        i += 1;
-                    }
+                    let math = read_math(&chars, &mut i, &mut line, "$$");
                     tokens.push(Token::MathDisplay { value: math });
                 } else {
                     // Inline math: $...$
                     i += 1;
-                    let mut math = String::new();
-                    while i < len {
-                        if chars[i] == '$' {
-                            i += 1;
-                            break;
-                        }
-                        if chars[i] == '\n' {
-                            line += 1;
-                        }
-                        math.push(chars[i]);
-                        i += 1;
-                    }
+                    let math = read_math(&chars, &mut i, &mut line, "$");
                     tokens.push(Token::MathInline { value: math });
                 }
             }
@@ -185,36 +163,19 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 if i + 1 < len && chars[i + 1] == '[' {
                     flush_text!();
                     i += 2; // skip \[
-                    let mut math = String::new();
-                    while i < len {
-                        if chars[i] == '\\' && i + 1 < len && chars[i + 1] == ']' {
-                            i += 2;
-                            break;
-                        }
-                        if chars[i] == '\n' {
-                            line += 1;
-                        }
-                        math.push(chars[i]);
-                        i += 1;
-                    }
+                    let math = read_math(&chars, &mut i, &mut line, "\\]");
                     tokens.push(Token::MathDisplay { value: math });
                     continue;
                 }
 
-                // 3. \begin{name} or \end{name}
-                let begin_prefix = "begin{";
-                let end_prefix = "end{";
-
-                // Compare in place: collecting the rest of the file for every
-                // backslash made lexing quadratic on long papers.
-                let starts_with = |prefix: &str| {
-                    let mut rest = chars[i + 1..].iter();
-                    prefix.chars().all(|c| rest.next() == Some(&c))
-                };
-
-                if starts_with(begin_prefix) {
+                // 3. \begin{name} or \end{name}, also with spaces before the
+                //    brace (`\end {equation}`), which TeX skips.
+                let env = ["begin", "end"]
+                    .into_iter()
+                    .find_map(|word| env_brace(&chars, i + 1, word).map(|brace| (word, brace)));
+                if let Some((word, brace)) = env {
                     flush_text!();
-                    i += 1 + begin_prefix.len(); // skip \begin{
+                    i = brace + 1;
                     let mut name = String::new();
                     while i < len && chars[i] != '}' {
                         name.push(chars[i]);
@@ -223,22 +184,12 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     if i < len {
                         i += 1; // skip closing }
                     }
-                    tokens.push(Token::BeginEnv { name, line });
-                    continue;
-                }
-
-                if starts_with(end_prefix) {
-                    flush_text!();
-                    i += 1 + end_prefix.len(); // skip \end{
-                    let mut name = String::new();
-                    while i < len && chars[i] != '}' {
-                        name.push(chars[i]);
-                        i += 1;
-                    }
-                    if i < len {
-                        i += 1; // skip closing }
-                    }
-                    tokens.push(Token::EndEnv { name, line });
+                    let name = name.trim().to_string();
+                    tokens.push(if word == "begin" {
+                        Token::BeginEnv { name, line }
+                    } else {
+                        Token::EndEnv { name, line }
+                    });
                     continue;
                 }
 
@@ -286,15 +237,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 if i < len && chars[i] == '(' {
                     flush_text!();
                     i += 1;
-                    let mut math = String::new();
-                    while i < len && !(chars[i] == '\\' && chars.get(i + 1) == Some(&')')) {
-                        if chars[i] == '\n' {
-                            line += 1;
-                        }
-                        math.push(chars[i]);
-                        i += 1;
-                    }
-                    i = (i + 2).min(len);
+                    let math = read_math(&chars, &mut i, &mut line, "\\)");
                     tokens.push(Token::MathInline { value: math });
                     continue;
                 }
@@ -328,6 +271,59 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
     flush_text!();
     tokens
+}
+
+/// The index of the `{` when `chars[start..]` is `word`, optional spaces
+/// and a brace: `begin{`, `end {`. Compared in place, since collecting the
+/// rest of the file at every backslash made lexing quadratic.
+fn env_brace(chars: &[char], start: usize, word: &str) -> Option<usize> {
+    let mut i = start;
+    for c in word.chars() {
+        if chars.get(i) != Some(&c) {
+            return None;
+        }
+        i += 1;
+    }
+    while matches!(chars.get(i), Some(' ' | '\t')) {
+        i += 1;
+    }
+    (chars.get(i) == Some(&'{')).then_some(i)
+}
+
+/// Read math up to `close` (`$`, `$$`, `\\]`, `\\)`) and step past it.
+/// Comments are dropped, so a `%` line cannot end the formula with a `$` of
+/// its own, and an escaped `\\$` stays inside it.
+fn read_math(chars: &[char], i: &mut usize, line: &mut usize, close: &str) -> String {
+    let close: Vec<char> = close.chars().collect();
+    let mut math = String::new();
+    while *i < chars.len() {
+        if chars[*i..].starts_with(&close) {
+            *i += close.len();
+            break;
+        }
+        match chars[*i] {
+            '\\' if *i + 1 < chars.len() => {
+                math.push('\\');
+                math.push(chars[*i + 1]);
+                if chars[*i + 1] == '\n' {
+                    *line += 1;
+                }
+                *i += 2;
+                continue;
+            }
+            '%' => {
+                while *i < chars.len() && chars[*i] != '\n' {
+                    *i += 1;
+                }
+                continue;
+            }
+            '\n' => *line += 1,
+            _ => {}
+        }
+        math.push(chars[*i]);
+        *i += 1;
+    }
+    math
 }
 
 /// Resolve an accent command named by a letter, starting right after the
@@ -453,6 +449,28 @@ mod tests {
                 value: "x^2".into()
             }
         );
+    }
+
+    #[test]
+    fn environment_names_may_follow_a_space() {
+        let tokens = tokenize("\\begin {equation}x\\end {equation}");
+        assert!(matches!(&tokens[0], Token::BeginEnv { name, .. } if name == "equation"));
+        assert!(matches!(&tokens[2], Token::EndEnv { name, .. } if name == "equation"));
+        assert!(
+            matches!(&tokenize("\\endgraf")[0], Token::Command { name, .. } if name == "endgraf")
+        );
+    }
+
+    #[test]
+    fn math_skips_comments_and_escaped_dollars() {
+        let tokens = tokenize("$a\n%$b\n+ \\$c$ after");
+        assert_eq!(
+            tokens[0],
+            Token::MathInline {
+                value: "a\n\n+ \\$c".into()
+            }
+        );
+        assert!(matches!(&tokens[1], Token::Text { value } if value == " after"));
     }
 
     #[test]
