@@ -229,17 +229,15 @@ impl Parser {
     /// `\\citep[prefix][suffix]{key1,key2}` and the other natbib/biblatex
     /// citation commands. With a single optional argument it is the suffix.
     fn parse_citation(&mut self, command: &str) -> Inline {
-        let first = self.parse_optional_argument();
-        let second = self.parse_optional_argument();
+        let first = self.parse_optional_text();
+        let second = self.parse_optional_text();
         let (prefix, suffix) = match (first, second) {
             (Some(pre), Some(post)) => (Some(pre), Some(post)),
             (Some(post), None) => (None, Some(post)),
             _ => (None, None),
         };
-        let non_empty = |s: Option<String>| {
-            s.map(|v| typographic(&unescape_latex(v.trim())).replace('~', "\u{00A0}"))
-                .filter(|v| !v.is_empty())
-        };
+        let non_empty =
+            |s: Option<String>| s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         let (prefix, suffix) = (non_empty(prefix), non_empty(suffix));
         let keys: Vec<String> = self
             .parse_brace_text()
@@ -292,6 +290,16 @@ impl Parser {
             tokens.push(tok);
         }
         Some(tokens)
+    }
+
+    /// The `[...]` argument read as text, with its commands resolved
+    /// (`[\textit{inter alia}]`, `[Kone{\v{c}}n{\'y}]`) and its formatting
+    /// dropped.
+    fn parse_optional_text(&mut self) -> Option<String> {
+        let tokens = self.parse_optional_tokens()?;
+        Some(docmux_ast::inlines_to_plain_text(
+            &self.inlines_from_tokens(tokens),
+        ))
     }
 
     /// If the next token is `BracketOpen`, consume `[...]` and return the
@@ -989,7 +997,7 @@ impl Parser {
             match tok {
                 Token::EndEnv { ref name, .. } if name == "thebibliography" => break,
                 Token::Command { ref name, .. } if name == "bibitem" => {
-                    let label = self.parse_optional_argument();
+                    let label = self.parse_optional_text();
                     let key = self.parse_brace_text().trim().to_string();
                     entries.push((label, key, Vec::new()));
                 }
@@ -2100,6 +2108,28 @@ mod tests {
                 .any(|i| matches!(i, Inline::CrossRef(r) if r.target == "thm:main")),
             "{lead:?}"
         );
+    }
+
+    #[test]
+    fn citation_notes_and_bibitem_labels_resolve_commands() {
+        let input = "\\begin{document}\nSee \\citep[][\\textit{inter alia}]{k}.\n\\begin{thebibliography}{9}\n\\bibitem[Kone{\\v{c}}n{\\'y} et~al.(2015)]{k} A paper.\n\\end{thebibliography}\n\\end{document}";
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected a paragraph, got {:?}", doc.content);
+        };
+        let cite = content.iter().find_map(|i| match i {
+            Inline::Citation(c) => Some(c),
+            _ => None,
+        });
+        assert_eq!(cite.unwrap().items[0].suffix.as_deref(), Some("inter alia"));
+        let Block::Div { content: refs, .. } = &doc.content[1] else {
+            panic!("expected the references, got {:?}", doc.content);
+        };
+        let label = refs.iter().find_map(|b| match b {
+            Block::Div { attrs, .. } => attrs.key_values.get("label"),
+            _ => None,
+        });
+        assert_eq!(label.map(String::as_str), Some("Konečný et al.(2015)"));
     }
 
     #[test]

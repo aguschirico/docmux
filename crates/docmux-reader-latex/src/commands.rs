@@ -189,6 +189,9 @@ pub(crate) fn abbreviation(name: &str) -> Option<&'static str> {
         "aa" => "\u{00E5}",
         "AA" => "\u{00C5}",
         "i" => "\u{0131}",
+        "j" => "\u{0237}",
+        "oe" => "\u{0153}",
+        "OE" => "\u{0152}",
         _ => return None,
     })
 }

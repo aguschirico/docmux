@@ -205,9 +205,14 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 let begin_prefix = "begin{";
                 let end_prefix = "end{";
 
-                let remaining: String = chars[i + 1..].iter().collect();
+                // Compare in place: collecting the rest of the file for every
+                // backslash made lexing quadratic on long papers.
+                let starts_with = |prefix: &str| {
+                    let mut rest = chars[i + 1..].iter();
+                    prefix.chars().all(|c| rest.next() == Some(&c))
+                };
 
-                if remaining.starts_with(begin_prefix) {
+                if starts_with(begin_prefix) {
                     flush_text!();
                     i += 1 + begin_prefix.len(); // skip \begin{
                     let mut name = String::new();
@@ -222,7 +227,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     continue;
                 }
 
-                if remaining.starts_with(end_prefix) {
+                if starts_with(end_prefix) {
                     flush_text!();
                     i += 1 + end_prefix.len(); // skip \end{
                     let mut name = String::new();
@@ -237,7 +242,15 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     continue;
                 }
 
-                // 4. Command: \letters (optionally followed by *)
+                // 4. Accents spelled with a letter: \v{c}, \c c, \H{o}. Checked
+                //    before commands, so `\v{c}` is not read as the command \v.
+                if let Some((accented, consumed)) = letter_accent(&chars[i + 1..]) {
+                    text_buf.push_str(&accented);
+                    i += 1 + consumed;
+                    continue;
+                }
+
+                // 4b. Command: \letters (optionally followed by *)
                 i += 1; // skip the backslash
                 if i < len && chars[i].is_ascii_alphabetic() {
                     flush_text!();
@@ -317,6 +330,29 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     tokens
 }
 
+/// Resolve an accent command named by a letter, starting right after the
+/// backslash: `v{c}`, `c{\i}`, or `v c` with a space. `\vspace` and `\cite`
+/// do not match, since the letter must be followed by a brace or a space.
+fn letter_accent(rest: &[char]) -> Option<(String, usize)> {
+    let mark = match rest.first()? {
+        'c' => '\u{0327}',
+        'v' => '\u{030C}',
+        'u' => '\u{0306}',
+        'H' => '\u{030B}',
+        'k' => '\u{0328}',
+        'r' => '\u{030A}',
+        'd' => '\u{0323}',
+        _ => return None,
+    };
+    let (base, consumed) = match rest.get(1..) {
+        Some(['{', b, '}', ..]) if b.is_alphabetic() => (*b, 4),
+        Some(['{', '\\', 'i', '}', ..]) => ('i', 5),
+        Some([' ', b, ..]) if b.is_alphabetic() => (*b, 3),
+        _ => return None,
+    };
+    Some((compose(base, mark), consumed))
+}
+
 /// Resolve a text-mode accent command starting right after the backslash:
 /// `'e`, `"{o}`, `` `a ``, `^\i`. Returns the accented text and the number of
 /// characters consumed.
@@ -350,10 +386,18 @@ fn compose(base: char, mark: char) -> String {
             "aeiouyAEIOUYncsznNCSZ",
             "áéíóúýÁÉÍÓÚÝńćśźňŃĆŚŹŇ",
         ),
-        ('\u{0300}', "aeiouAEIOU", "àèìòùÀÈÌÒÙ"),
+        ('\u{0300}', "aeiouyAEIOUY", "àèìòùỳÀÈÌÒÙỲ"),
         ('\u{0302}', "aeiouAEIOU", "âêîôûÂÊÎÔÛ"),
         ('\u{0308}', "aeiouyAEIOU", "äëïöüÿÄËÏÖÜ"),
         ('\u{0303}', "anoANO", "ãñõÃÑÕ"),
+        ('\u{0304}', "aeiouAEIOU", "āēīōūĀĒĪŌŪ"),
+        ('\u{0307}', "zegcZEGCI", "żėġċŻĖĠĊİ"),
+        ('\u{0327}', "cstCST", "çşţÇŞŢ"),
+        ('\u{030C}', "cszrnedtCSZRNEDT", "čšžřňěďťČŠŽŘŇĚĎŤ"),
+        ('\u{0306}', "aguAGU", "ăğŭĂĞŬ"),
+        ('\u{030B}', "ouOU", "őűŐŰ"),
+        ('\u{0328}', "aeAE", "ąęĄĘ"),
+        ('\u{030A}', "auAU", "åůÅŮ"),
     ];
     TABLE
         .iter()
@@ -409,6 +453,23 @@ mod tests {
                 value: "x^2".into()
             }
         );
+    }
+
+    #[test]
+    fn letter_accents_compose() {
+        let text = |src: &str| match &tokenize(src)[..] {
+            [Token::Text { value }] => value.clone(),
+            other => panic!("expected one text token, got {other:?}"),
+        };
+        assert_eq!(text(r"Kone\v{c}n\`y"), "Konečnỳ");
+        assert_eq!(text(r#"G\"ul\c{c}ehre"#), "Gülçehre");
+        assert_eq!(text(r"Erd\H{o}s"), "Erdős");
+        assert_eq!(text(r"Pi\k{e}kos"), "Piękos");
+        assert_eq!(text(r"\v Sedivy"), "Šedivy");
+        assert!(
+            matches!(&tokenize(r"\vspace{1em}")[0], Token::Command { name, .. } if name == "vspace")
+        );
+        assert!(matches!(&tokenize(r"\cite{x}")[0], Token::Command { name, .. } if name == "cite"));
     }
 
     #[test]
