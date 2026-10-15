@@ -394,31 +394,50 @@ pub struct Image {
 impl Image {
     /// Convenience: extract alt text as a plain string (concatenating text nodes).
     pub fn alt_text(&self) -> String {
-        fn collect_text(inlines: &[Inline], out: &mut String) {
-            for inline in inlines {
-                match inline {
-                    Inline::Text { value } => out.push_str(value),
-                    Inline::Emphasis { content }
-                    | Inline::Strong { content }
-                    | Inline::Strikethrough { content }
-                    | Inline::Underline { content }
-                    | Inline::Superscript { content }
-                    | Inline::Subscript { content }
-                    | Inline::SmallCaps { content }
-                    | Inline::Span { content, .. }
-                    | Inline::Quoted { content, .. } => collect_text(content, out),
-                    Inline::Code { value, .. } => out.push_str(value),
-                    Inline::MathInline { value } => out.push_str(value),
-                    Inline::SoftBreak => out.push(' '),
-                    Inline::HardBreak => out.push('\n'),
-                    _ => {}
+        inlines_to_plain_text(&self.alt)
+    }
+}
+
+/// The text of `inlines` with all formatting dropped, like pandoc's `stringify`:
+/// code and math keep their source, quotes get their quote marks, breaks become
+/// whitespace, and notes, citations and images contribute nothing.
+pub fn inlines_to_plain_text(inlines: &[Inline]) -> String {
+    fn collect(inlines: &[Inline], out: &mut String) {
+        for inline in inlines {
+            match inline {
+                Inline::Text { value } => out.push_str(value),
+                Inline::Emphasis { content }
+                | Inline::Strong { content }
+                | Inline::Strikethrough { content }
+                | Inline::Underline { content }
+                | Inline::Superscript { content }
+                | Inline::Subscript { content }
+                | Inline::SmallCaps { content }
+                | Inline::Span { content, .. }
+                | Inline::Link { content, .. } => collect(content, out),
+                Inline::Quoted {
+                    quote_type,
+                    content,
+                } => {
+                    let (open, close) = match quote_type {
+                        QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
+                        QuoteType::DoubleQuote => ('\u{201C}', '\u{201D}'),
+                    };
+                    out.push(open);
+                    collect(content, out);
+                    out.push(close);
                 }
+                Inline::Code { value, .. } => out.push_str(value),
+                Inline::MathInline { value } => out.push_str(value),
+                Inline::SoftBreak => out.push(' '),
+                Inline::HardBreak => out.push('\n'),
+                _ => {}
             }
         }
-        let mut s = String::new();
-        collect_text(&self.alt, &mut s);
-        s
     }
+    let mut s = String::new();
+    collect(inlines, &mut s);
+    s
 }
 
 // ─── Citation ────────────────────────────────────────────────────────────────

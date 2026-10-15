@@ -47,6 +47,9 @@ pub struct Parser {
     footnote_defs: Vec<Block>,
     footnote_counter: usize,
     abstract_text: Option<Vec<Block>>,
+    /// Environments being parsed, outermost first, so a mismatched `\end`
+    /// can tell an enclosing environment from a stray one.
+    open_envs: Vec<String>,
 }
 
 impl Parser {
@@ -59,6 +62,7 @@ impl Parser {
             footnote_defs: Vec::new(),
             footnote_counter: 0,
             abstract_text: None,
+            open_envs: Vec::new(),
         }
     }
 
@@ -263,29 +267,42 @@ impl Parser {
     }
 
     /// If the next token is `BracketOpen`, consume `[...]` and return the
-    /// contained text. Otherwise return `None`.
-    fn parse_optional_argument(&mut self) -> Option<String> {
+    /// tokens inside it. Brackets nest, and a `]` inside braces does not close.
+    fn parse_optional_tokens(&mut self) -> Option<Vec<Token>> {
         if !matches!(self.peek(), Some(Token::BracketOpen)) {
             return None;
         }
         self.advance(); // consume BracketOpen
 
-        let mut s = String::new();
-        let mut depth: u32 = 1;
-
+        let mut tokens = Vec::new();
+        let (mut brackets, mut braces) = (1u32, 0u32);
         while let Some(tok) = self.advance() {
             match tok {
-                Token::BracketOpen => {
-                    depth += 1;
-                    s.push('[');
-                }
-                Token::BracketClose => {
-                    depth -= 1;
-                    if depth == 0 {
+                Token::BracketOpen if braces == 0 => brackets += 1,
+                Token::BracketClose if braces == 0 => {
+                    brackets -= 1;
+                    if brackets == 0 {
                         break;
                     }
-                    s.push(']');
                 }
+                Token::BraceOpen => braces += 1,
+                Token::BraceClose => braces = braces.saturating_sub(1),
+                _ => {}
+            }
+            tokens.push(tok);
+        }
+        Some(tokens)
+    }
+
+    /// If the next token is `BracketOpen`, consume `[...]` and return the
+    /// contained text. Otherwise return `None`.
+    fn parse_optional_argument(&mut self) -> Option<String> {
+        let tokens = self.parse_optional_tokens()?;
+        let mut s = String::new();
+        for tok in tokens {
+            match tok {
+                Token::BracketOpen => s.push('['),
+                Token::BracketClose => s.push(']'),
                 Token::Text { value } => s.push_str(&value),
                 Token::Newline => s.push(' '),
                 Token::MathInline { value } => {
@@ -301,7 +318,6 @@ impl Parser {
                 _ => {}
             }
         }
-
         Some(s)
     }
 
@@ -403,7 +419,40 @@ impl Parser {
     /// Parse between `\begin{document}` and `\end{document}` (or all tokens
     /// in snippet mode).
     fn parse_body(&mut self) -> Vec<Block> {
-        self.parse_blocks(Some("document"))
+        self.open_envs.push("document".into());
+        let blocks = self.parse_blocks(Some("document"));
+        self.open_envs.pop();
+        blocks
+    }
+
+    /// For a token that ends the current environment but is not its own
+    /// `\end`: true when it closes an enclosing environment, which then ends
+    /// this one too, as LaTeX's error recovery does. A stray `\end` that closes
+    /// nothing is consumed with a warning and gives false.
+    fn ends_enclosing_env(&mut self) -> bool {
+        let Some(Token::EndEnv { name, line }) = self.peek() else {
+            return false;
+        };
+        if self.open_envs.iter().any(|open| open == name) {
+            return true;
+        }
+        let (name, line) = (name.clone(), *line);
+        self.advance();
+        self.warn(line, format!("\\end{{{name}}} without a matching \\begin"));
+        false
+    }
+
+    /// Skips a token that no rule consumed, so a parsing loop always moves on.
+    fn skip_unparsed_token(&mut self) {
+        if let Some(tok) = self.advance() {
+            let line = match tok {
+                Token::Command { line, .. }
+                | Token::BeginEnv { line, .. }
+                | Token::EndEnv { line, .. } => line,
+                _ => 0,
+            };
+            self.warn(line, format!("Skipped unexpected token: {tok:?}"));
+        }
     }
 
     /// Collect blocks until `\end{stop_env}` or EOF.
@@ -417,6 +466,12 @@ impl Parser {
                     self.advance(); // consume EndEnv
                     break;
                 }
+            }
+            if matches!(tok, Token::EndEnv { .. }) {
+                if self.ends_enclosing_env() {
+                    break;
+                }
+                continue;
             }
 
             // Skip blank lines between blocks (paragraph separators consumed
@@ -496,6 +551,13 @@ impl Parser {
                             self.advance();
                             continue;
                         }
+                        "item" => {
+                            // An \item outside itemize/enumerate (in a custom
+                            // list environment): its text becomes a paragraph.
+                            self.advance();
+                            self.parse_optional_argument();
+                            continue;
+                        }
                         "footnotetext" => {
                             self.advance();
                             let opt_n = self.parse_optional_argument();
@@ -551,9 +613,13 @@ impl Parser {
             }
 
             // Otherwise, collect a paragraph of inlines.
+            let start = self.pos;
             let inlines = self.collect_paragraph_inlines();
             if !inlines.is_empty() {
                 blocks.push(Block::Paragraph { content: inlines });
+            }
+            if self.pos == start {
+                self.skip_unparsed_token();
             }
         }
 
@@ -717,8 +783,10 @@ impl Parser {
             }
             "texttt" => {
                 // \texttt is typeset text in a monospace font, not verbatim:
-                // its escapes (\{, \%, \_) are resolved like any other text.
-                let value = unescape_latex(&self.parse_brace_text());
+                // its escapes and commands (\{, \textbackslash, \textbf) are
+                // read like any other text, then flattened, as pandoc does.
+                let content = self.parse_inline_content();
+                let value = docmux_ast::inlines_to_plain_text(&content);
                 Some(Inline::Code { value, attrs: None })
             }
             "textsc" => {
@@ -866,6 +934,7 @@ impl Parser {
             footnote_defs: Vec::new(),
             footnote_counter: self.footnote_counter,
             abstract_text: None,
+            open_envs: Vec::new(),
         };
 
         let mut inlines = Vec::new();
@@ -1001,26 +1070,29 @@ impl Parser {
         if title.is_none() && !Self::is_layout_env(base) {
             self.warn(line, format!("Unknown environment: {env_name}"));
         }
-        // minipage{width}, and the [title] of a theorem.
-        let note = self.parse_optional_argument();
+        // minipage{width}, and the [title] of a theorem, which can hold
+        // citations and references.
+        let note = self.parse_optional_tokens();
         if matches!(base, "minipage" | "adjustbox" | "multicols") {
             self.parse_brace_argument();
         }
+        let note = note.map(|tokens| self.inlines_from_tokens(tokens));
         let mut content = self.parse_blocks(Some(env_name));
         if let Some(title) = title {
-            let mut lead = match note {
-                Some(n) if !n.trim().is_empty() => format!("{title} ({}).", n.trim()),
-                _ => format!("{title}."),
-            };
-            lead.push(' ');
+            let mut lead = vec![Inline::text(title)];
+            match note {
+                Some(note) if !docmux_ast::inlines_to_plain_text(&note).trim().is_empty() => {
+                    lead.push(Inline::text(" ("));
+                    lead.extend(note);
+                    lead.push(Inline::text(")."));
+                }
+                _ => lead.push(Inline::text(".")),
+            }
+            lead.push(Inline::text(" "));
             let label = if base == "proof" {
-                Inline::Emphasis {
-                    content: vec![Inline::text(lead)],
-                }
+                Inline::Emphasis { content: lead }
             } else {
-                Inline::Strong {
-                    content: vec![Inline::text(lead)],
-                }
+                Inline::Strong { content: lead }
             };
             match content.first_mut() {
                 Some(Block::Paragraph { content: first }) => first.insert(0, label),
@@ -1097,6 +1169,13 @@ impl Parser {
 
     /// Dispatch an environment by name to the appropriate handler.
     fn parse_environment(&mut self, env_name: &str, line: usize) -> Option<Block> {
+        self.open_envs.push(env_name.to_string());
+        let block = self.parse_environment_body(env_name, line);
+        self.open_envs.pop();
+        block
+    }
+
+    fn parse_environment_body(&mut self, env_name: &str, line: usize) -> Option<Block> {
         match env_name {
             "itemize" => Some(self.parse_list(false, "itemize")),
             "enumerate" => Some(self.parse_list(true, "enumerate")),
@@ -1211,6 +1290,12 @@ impl Parser {
                 self.advance();
                 break;
             }
+            if matches!(tok, Token::EndEnv { .. }) {
+                if self.ends_enclosing_env() {
+                    break;
+                }
+                continue;
+            }
 
             // Expect \item command.
             if matches!(tok, Token::Command { ref name, .. } if name == "item") {
@@ -1245,9 +1330,15 @@ impl Parser {
         let mut blocks = Vec::new();
 
         while let Some(tok) = self.peek() {
-            // Stop on \end{env_name}.
+            // Stop on \end{env_name}, or on the \end of an enclosing environment.
             if matches!(tok, Token::EndEnv { name, .. } if name == env_name) {
                 break;
+            }
+            if matches!(tok, Token::EndEnv { .. }) {
+                if self.ends_enclosing_env() {
+                    break;
+                }
+                continue;
             }
             // Stop on next \item.
             if matches!(tok, Token::Command { ref name, .. } if name == "item") {
@@ -1293,9 +1384,13 @@ impl Parser {
             }
 
             // Otherwise, collect paragraph inlines.
+            let start = self.pos;
             let inlines = self.collect_paragraph_inlines();
             if !inlines.is_empty() {
                 blocks.push(Block::Paragraph { content: inlines });
+            }
+            if self.pos == start {
+                self.skip_unparsed_token();
             }
         }
 
@@ -1824,6 +1919,7 @@ impl Parser {
             footnote_defs: Vec::new(),
             footnote_counter: self.footnote_counter,
             abstract_text: None,
+            open_envs: Vec::new(),
         };
 
         let mut inlines = Vec::new();
@@ -1931,6 +2027,79 @@ mod tests {
         let doc = Parser::new(tokens).parse();
         assert_eq!(doc.content.len(), 1);
         assert!(matches!(&doc.content[0], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn texttt_reads_its_commands_and_flattens_them() {
+        let input = r#"\texttt{"Input: <s>{\textbackslash}n", \textbf{bold}, a\_b \{x\} 50\%}"#;
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Paragraph { content } = &doc.content[0] else {
+            panic!("expected a paragraph, got {:?}", doc.content[0]);
+        };
+        let Inline::Code { value, .. } = &content[0] else {
+            panic!("expected code, got {:?}", content[0]);
+        };
+        assert_eq!(value, r#""Input: <s>\n", bold, a_b {x} 50%"#);
+    }
+
+    fn paragraphs_text(blocks: &[Block]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph { content } => Some(docmux_ast::inlines_to_plain_text(content)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn unclosed_environment_ends_with_the_document() {
+        let input = "\\begin{document}\n\\begin{note}\nInside.\n\\end{document}";
+        let doc = Parser::new(tokenize(input)).parse();
+        assert!(matches!(&doc.content[..], [Block::Div { content, .. }] if content.len() == 1));
+    }
+
+    #[test]
+    fn stray_end_is_skipped() {
+        let input = "\\begin{document}\nBefore \\end{note} after.\n\\end{document}";
+        let doc = Parser::new(tokenize(input)).parse();
+        let text = paragraphs_text(&doc.content);
+        assert!(text.contains("Before") && text.contains("after."), "{text}");
+    }
+
+    #[test]
+    fn item_outside_a_list_environment_keeps_its_text() {
+        let input = "\\begin{document}\n\\begin{steps}\n\\item First.\n\\item Second.\n\\end{steps}\n\\end{document}";
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Div { content, .. } = &doc.content[0] else {
+            panic!("expected a div, got {:?}", doc.content);
+        };
+        let text = paragraphs_text(content);
+        assert!(
+            text.contains("First.") && text.contains("Second."),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn theorem_title_reads_references_and_citations() {
+        let input = "\\begin{proof}[Proof of Theorem \\ref{thm:main}]\nDone.\n\\end{proof}";
+        let doc = Parser::new(tokenize(input)).parse();
+        let Block::Div { content, .. } = &doc.content[0] else {
+            panic!("expected a div, got {:?}", doc.content);
+        };
+        let Block::Paragraph { content } = &content[0] else {
+            panic!("expected a paragraph, got {content:?}");
+        };
+        let Inline::Emphasis { content: lead } = &content[0] else {
+            panic!("expected an emphasized lead, got {content:?}");
+        };
+        assert!(
+            lead.iter()
+                .any(|i| matches!(i, Inline::CrossRef(r) if r.target == "thm:main")),
+            "{lead:?}"
+        );
     }
 
     #[test]
